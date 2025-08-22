@@ -17,19 +17,21 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 public class UserNotification {
+
     //유저 알림 번호
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "user_notification_seq", nullable = false)
     private Integer userNotificationSeq;
 
-    //알림 번호
+    //알림 번호 (FK)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "notification_seq", nullable = false)
     private Notification notification;
 
+    //유저 번호
     @Column(name = "user_seq", nullable = false)
-    private Integer userSeq;
+    private String userSeq;
 
     //알림 전송 시간
     @Column(name = "sent_at", nullable = false)

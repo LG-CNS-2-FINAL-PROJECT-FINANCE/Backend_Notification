@@ -8,7 +8,10 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 
 public interface UserNotificationRepository extends JpaRepository<UserNotification, Integer> {
-    @Query("SELECT un FROM UserNotification un JOIN FETCH un.notification WHERE un.userSeq = :userSeq")
-    List<UserNotification> findAllByUserSeq(@Param("userSeq") Integer userSeq);
+    List<UserNotification> findAllByUserSeq(String userSeq);
 
+    @Query("SELECT un FROM UserNotification un " +
+            "WHERE un.userSeq = :userSeq AND un.userNotificationSeq IN :ids")
+    List<UserNotification> findAllByUserSeqAndIds(@Param("userSeq") String userSeq,
+                                                  @Param("ids") List<Integer> ids);
 }

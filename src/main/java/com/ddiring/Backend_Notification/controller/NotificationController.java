@@ -1,5 +1,6 @@
 package com.ddiring.Backend_Notification.controller;
 
+import com.ddiring.Backend_Notification.common.util.GatewayRequestHeaderUtils;
 import com.ddiring.Backend_Notification.dto.request.MarkAsReadRequest;
 import com.ddiring.Backend_Notification.dto.response.UserNotificationResponse;
 import com.ddiring.Backend_Notification.service.NotificationService;
@@ -18,24 +19,29 @@ import java.util.List;
 public class NotificationController {
     private final NotificationService notificationService;
 
-    @GetMapping(value = "/stream/{userId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@PathVariable Integer userId) {
-        return notificationService.connect(String.valueOf(userId));
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter stream() {
+        List<String> userSeqs;
+        try {
+            userSeqs = List.of(GatewayRequestHeaderUtils.getUserSeq());
+        } catch (Exception e) {
+            userSeqs = List.of("1", "2", "3", "4", "5"); //테스트용
+        }
+
+        return notificationService.connectForUsers(userSeqs);
     }
 
-    @GetMapping("/list/{userSeq}")
-    public ResponseEntity<List<UserNotificationResponse>> getUserNotifications(
-            @PathVariable Integer userSeq) {
-        List<UserNotificationResponse> responses = notificationService.getUserNotifications(userSeq);
-        return ResponseEntity.ok(responses);
+    @GetMapping("/list")
+    public ResponseEntity<List<UserNotificationResponse>> getUserNotifications() {
+        String userSeq = GatewayRequestHeaderUtils.getUserSeq();
+        return ResponseEntity.ok(notificationService.getUserNotifications(userSeq));
     }
 
-//    @PostMapping("/read")
-//    public ResponseEntity<Void> markAsRead(
-//            @AuthenticationPrincipal CustomUserDetails user,
-//            @RequestBody MarkAsReadRequest request) {
-//
-//        notificationService.markAsRead(user.getUserSeq(), request);
-//        return ResponseEntity.ok().build();
-//    }
+    @PostMapping("/read")
+    public ResponseEntity<Void> markAsRead(@RequestBody MarkAsReadRequest request) {
+        String userSeq = GatewayRequestHeaderUtils.getUserSeq();
+        notificationService.markAsRead(userSeq, request);
+        return ResponseEntity.ok().build();
+    }
+
 }

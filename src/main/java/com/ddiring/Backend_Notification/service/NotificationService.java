@@ -7,6 +7,7 @@ import com.ddiring.Backend_Notification.dto.response.NotificationResponse;
 import com.ddiring.Backend_Notification.dto.response.UserNotificationResponse;
 import com.ddiring.Backend_Notification.enums.NotificationStatus;
 import com.ddiring.Backend_Notification.enums.NotificationType;
+import com.ddiring.Backend_Notification.kafka.EventEnvelope;
 import com.ddiring.Backend_Notification.kafka.NotificationPayload;
 import com.ddiring.Backend_Notification.repository.NotificationRepository;
 import com.ddiring.Backend_Notification.repository.UserNotificationRepository;
@@ -16,10 +17,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 @Service
 @RequiredArgsConstructor
@@ -27,42 +29,48 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final UserNotificationRepository userNotificationRepository;
 
-    private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
+    private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
     //SSE 연결
-    public SseEmitter connect(String userId) {
+    public SseEmitter connectForUsers(List<String> userSeqs) {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
-        emitters.put(userId, emitter);
 
-        emitter.onCompletion(() -> emitters.remove(userId));
-        emitter.onTimeout(() -> emitters.remove(userId));
+        for (String userSeq : userSeqs) {
+            emitters.computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>()).add(emitter);
+        }
+
+        emitter.onCompletion(() -> userSeqs.forEach(seq -> emitters.getOrDefault(seq, List.of()).remove(emitter)));
+        emitter.onTimeout(() -> userSeqs.forEach(seq -> emitters.getOrDefault(seq, List.of()).remove(emitter)));
 
         return emitter;
     }
 
     //SSE 전송
-    public void sendNotification(Integer userSeq, NotificationPayload payload) {
-        SseEmitter emitter = emitters.get(String.valueOf(userSeq));
-        System.out.println("SSE 전송 시도: userSeq=" + userSeq + ", emitter=" + emitter);
-        if (emitter != null) {
+    public void sendNotification(String userSeq, NotificationPayload payload) {
+        List<SseEmitter> userEmitters = emitters.get(userSeq);
+        if (userEmitters == null) return;
+
+        for (SseEmitter emitter : userEmitters) {
             try {
                 emitter.send(SseEmitter.event()
                         .name("Notification")
                         .data(payload));
-                System.out.println("📤 SSE 전송 완료: " + payload);
             } catch (Exception e) {
-                emitters.remove(String.valueOf(userSeq));
+                //실패하면 emitter 제거
+                userEmitters.remove(emitter);
             }
         }
     }
 
     //알림 저장 + 전송
     @Transactional
-    public void handleNotificationEvent(NotificationPayload payload) {
+    public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
+        NotificationPayload payload = envelope.getPayload();
         LocalDateTime now = LocalDateTime.now();
 
         //Notification 저장
         Notification notification = Notification.builder()
+                .eventId(envelope.getEventId())
                 .notificationType(NotificationType.valueOf(payload.getNotificationType()))
                 .message(payload.getMessage())
                 .createdId("system")
@@ -73,7 +81,7 @@ public class NotificationService {
         notificationRepository.save(notification);
 
         //UserNotification 저장 + SSE 전송
-        for (Integer userSeq : payload.getUserSeqs()) {
+        for (String userSeq : payload.getUserSeqs()) {
             UserNotification userNotification = UserNotification.builder()
                     .notification(notification)
                     .userSeq(userSeq)
@@ -92,8 +100,9 @@ public class NotificationService {
     }
 
     //사용자 알림 리스트 조회
-    public List<UserNotificationResponse> getUserNotifications(Integer userSeq) {
+    public List<UserNotificationResponse> getUserNotifications(String userSeq) {
         List<UserNotification> notifications = userNotificationRepository.findAllByUserSeq(userSeq);
+
         return notifications.stream()
                 .map(n -> UserNotificationResponse.builder()
                         .userNotificationSeq(n.getUserNotificationSeq())
@@ -108,20 +117,19 @@ public class NotificationService {
                                 .createdAt(n.getNotification().getCreatedAt())
                                 .build())
                         .build())
-                .collect(Collectors.toList());
+                .toList();
     }
 
-//    //알림 읽음 처리
-//    public void markAsRead(MarkAsReadRequest request, Integer userSeq) {
-//        List<UserNotification> notifications =
-//                userNotificationRepository.findAllByUserSeqAndIds(userSeq, request.getUserNotificationSeqs());
-//
-//        LocalDateTime now = LocalDateTime.now();
-//
-//        notifications.forEach(n -> {
-//            n.setNotificationStatus(NotificationStatus.READ);
-//            n.setReadAt(now);
-//        });
-//    }
+    //알림 읽음 처리
+    public void markAsRead(String userSeq, MarkAsReadRequest request) {
+        List<UserNotification> notifications =
+                userNotificationRepository.findAllByUserSeqAndIds(userSeq, request.getUserNotificationSeqs());
+
+        LocalDateTime now = LocalDateTime.now();
+        notifications.forEach(n -> {
+            n.setNotificationStatus(NotificationStatus.READ);
+            n.setReadAt(now);
+        });
+    }
 
 }

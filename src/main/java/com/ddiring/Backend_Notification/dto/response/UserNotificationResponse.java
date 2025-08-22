@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 @Builder
 public class UserNotificationResponse {
     private Integer userNotificationSeq;
-    private Integer userSeq;
+    private String userSeq;
     private NotificationStatus notificationStatus;
     private LocalDateTime sentAt;
     private LocalDateTime readAt;

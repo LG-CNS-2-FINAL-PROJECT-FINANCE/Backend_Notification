@@ -30,7 +30,7 @@ public class NotificationConsumer {
             System.out.println("➡️ Payload: " + envelope.getPayload());
 
             // 실제 서비스 호출
-            notificationService.handleNotificationEvent(envelope.getPayload());
+            notificationService.handleNotificationEvent(envelope);
 
             System.out.println("✅ Kafka 이벤트 처리 완료");
         } catch (Exception e) {

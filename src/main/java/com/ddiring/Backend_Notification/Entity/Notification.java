@@ -17,18 +17,23 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 public class Notification {
+
     //알림 번호
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "notification_seq", nullable = false)
-    private Integer NotificationSeq;
+    private Integer notificationSeq;
+
+    //Kafka 이벤트 ID (UUID)
+    @Column(name = "event_id", nullable = false, unique = true, length = 36)
+    private String eventId;
 
     //알림 종류
     @Convert(converter = NotificationTypeConverter.class)
     @Column(name = "notification_type", nullable = false)
     private NotificationType notificationType;
 
-    //알림 내용
+    // 알림 내용
     @Column(name = "message", nullable = false, length = 2000)
     private String message;
 

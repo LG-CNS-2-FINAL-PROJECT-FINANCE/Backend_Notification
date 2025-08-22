@@ -1,6 +1,5 @@
 package com.ddiring.Backend_Notification.kafka;
 
-import com.ddiring.Backend_Notification.enums.NotificationType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -28,7 +27,7 @@ public class NotificationProducer {
 
             String json = objectMapper.writeValueAsString(envelope);
             kafkaTemplate.send(TOPIC, json);
-            System.out.println("📤 Kafka 메시지 전송 완료: " + json);
+            System.out.println("Kafka 메시지 전송 완료: " + json);
         } catch (Exception e) {
             throw new RuntimeException("Kafka 직렬화 실패", e);
         }

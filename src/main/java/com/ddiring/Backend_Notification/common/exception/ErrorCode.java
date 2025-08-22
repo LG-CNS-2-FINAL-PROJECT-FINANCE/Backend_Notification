@@ -2,7 +2,11 @@ package com.ddiring.Backend_Notification.common.exception;
 
 import org.springframework.http.HttpStatus;
 
+import static org.springframework.http.HttpStatus.NOT_FOUND;
+
 public enum ErrorCode {
+    USER_NOT_FOUND("USER_NOT_FOUNT", "사용자를 찾을 수 없습니다.", NOT_FOUND),
+    INVALID_USER_SEQ("INVALID_USER_SEQ", "잘못된 사용자입니다.", HttpStatus.BAD_REQUEST),
     INVALID_PARAMETER("INVALID_PARAMETER", "잘못된 파라미터입니다.", HttpStatus.BAD_REQUEST),
     SERVER_ERROR("SERVER_ERROR", "서버 오류입니다.", HttpStatus.INTERNAL_SERVER_ERROR);
 
