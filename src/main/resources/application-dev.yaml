@@ -1,0 +1,5 @@
+spring:
+  config:
+    import:
+      - file:/etc/config/application-dev.yaml
+      - file:/etc/secret/application-secret.yaml

@@ -1,0 +1,18 @@
+package com.ddiring.Backend_Notification.kafka;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.Instant;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class EventEnvelope<T> {
+    private String eventId;
+    private Instant timestamp;
+    private T payload;
+}

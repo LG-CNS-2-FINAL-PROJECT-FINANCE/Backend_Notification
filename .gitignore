@@ -35,3 +35,6 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Docker volumes (local DB/Kafka/ZooKeeper data) ###
+/data/
