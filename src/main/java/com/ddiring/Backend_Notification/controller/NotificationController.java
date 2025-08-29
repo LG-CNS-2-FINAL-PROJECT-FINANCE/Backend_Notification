@@ -25,17 +25,33 @@ public class NotificationController {
     private final NotificationService notificationService;
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestParam(value = "userSeq", required = false) List<String> userSeqList) {
+    public SseEmitter stream(
+            @RequestParam(value = "userSeq", required = false) List<String> userSeqList,
+            @RequestParam(value = "token", required = false) String token
+    ) {
         if (userSeqList == null || userSeqList.isEmpty()) {
-            String userSeq = GatewayRequestHeaderUtils.getUserSeq();
-            if (userSeq == null || userSeq.isBlank()) {
+            if (token == null || token.isBlank()) {
                 throw new ApplicationException(ErrorCode.UNAUTHORIZED);
             }
+            // 토큰 디코딩 후 userSeq 추출
+            String userSeq = GatewayRequestHeaderUtils.getUserSeqFromToken(token);
             userSeqList = Collections.singletonList(userSeq);
         }
-
         return notificationService.connectForUsers(userSeqList);
     }
+
+//    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+//    public SseEmitter stream(@RequestParam(value = "userSeq", required = false) List<String> userSeqList) {
+//        if (userSeqList == null || userSeqList.isEmpty()) {
+//            String userSeq = GatewayRequestHeaderUtils.getUserSeq();
+//            if (userSeq == null || userSeq.isBlank()) {
+//                throw new ApplicationException(ErrorCode.UNAUTHORIZED);
+//            }
+//            userSeqList = Collections.singletonList(userSeq);
+//        }
+//
+//        return notificationService.connectForUsers(userSeqList);
+//    }
 
     @GetMapping("/list")
     public ResponseEntity<List<UserNotificationResponse>> getUserNotifications() {
