@@ -2,10 +2,13 @@ package com.ddiring.Backend_Notification.common.util;
 
 import com.ddiring.Backend_Notification.common.exception.ApplicationException;
 import com.ddiring.Backend_Notification.common.exception.ErrorCode;
+import io.jsonwebtoken.security.Keys;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+
+import java.nio.charset.StandardCharsets;
 
 public class GatewayRequestHeaderUtils {
 
@@ -32,10 +35,16 @@ public class GatewayRequestHeaderUtils {
         }
 
         try {
-            // 토큰에서 서명 없이 Claims 파싱
+            // 쿠버네티스 환경에서 JWT_SECRET 환경 변수로 주입
+            String secret = System.getenv("JWT_SECRET");
+            if (secret == null || secret.isBlank()) {
+                throw new ApplicationException(ErrorCode.UNAUTHORIZED);
+            }
+
             Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8)))
                     .build()
-                    .parseClaimsJws(token.replace("Bearer ", ""))
+                    .parseClaimsJws(token)
                     .getBody();
 
             String userSeq = claims.get("userSeq", String.class);
@@ -48,4 +57,5 @@ public class GatewayRequestHeaderUtils {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED);
         }
     }
+
 }
