@@ -15,7 +15,8 @@ public class NotificationProducer {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
-    private static final String TOPIC = "notification-topic";
+    private static final String TOPIC = "notification";
+    private static final String DLQ_TOPIC = "notification-dlq";
 
     public void sendNotification(NotificationPayload payload) {
         try {
@@ -27,9 +28,23 @@ public class NotificationProducer {
 
             String json = objectMapper.writeValueAsString(envelope);
             kafkaTemplate.send(TOPIC, json);
-            System.out.println("Kafka 메시지 전송 완료: " + json);
         } catch (Exception e) {
-            throw new RuntimeException("Kafka 직렬화 실패", e);
+            System.err.println("[Producer] Kafka 직렬화 실패, DLQ로 이동: " + e.getMessage());
+            sendToDLQ(payload);
+        }
+    }
+
+    private void sendToDLQ(NotificationPayload payload) {
+        try {
+            EventEnvelope<NotificationPayload> envelope = EventEnvelope.<NotificationPayload>builder()
+                    .eventId(UUID.randomUUID().toString())
+                    .timestamp(Instant.now())
+                    .payload(payload)
+                    .build();
+            String json = objectMapper.writeValueAsString(envelope);
+            kafkaTemplate.send(DLQ_TOPIC, json);
+        } catch (Exception e) {
+            System.err.println("[DLQ] 전송 실패: " + e.getMessage());
         }
     }
 }

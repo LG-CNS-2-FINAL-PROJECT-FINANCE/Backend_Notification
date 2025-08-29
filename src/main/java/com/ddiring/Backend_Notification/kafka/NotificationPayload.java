@@ -9,7 +9,8 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class NotificationPayload {
-    private List<String> userSeqs;        // 수신자
-    private String notificationType;      // 알림 타입
-    private String message;               // 알림 메시지
+    private List<String> userSeq;         //수신자
+    private String notificationType;      //알림 타입
+    private String title;                 //제목
+    private String message;               //알림 메시지
 }

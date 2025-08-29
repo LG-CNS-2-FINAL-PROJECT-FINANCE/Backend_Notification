@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 public class NotificationResponse {
     private Integer notificationSeq;
     private NotificationType notificationType;
+    private String title;
     private String message;
     private LocalDateTime createdAt;
 }

@@ -13,5 +13,6 @@ import lombok.NoArgsConstructor;
 public class CreateNotificationRequest {
     private Integer userSeq;
     private NotificationType notificationType;
+    private String title;
     private String message;
 }

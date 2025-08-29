@@ -1,10 +1,10 @@
 package com.ddiring.Backend_Notification.kafka;
 
 import com.ddiring.Backend_Notification.service.NotificationService;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -13,29 +13,22 @@ public class NotificationConsumer {
 
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
+    private final KafkaTemplate<String, String> kafkaTemplate;
 
-    @KafkaListener(topics = "notification-topic", groupId = "notification-group")
+    private static final String MAIN_TOPIC = "notification";
+    private static final String DLQ_TOPIC  = "notification-dlq";
+
+    @KafkaListener(topics = MAIN_TOPIC, groupId = "notification-group")
     public void consume(String message) {
         try {
             EventEnvelope<NotificationPayload> envelope =
-                    objectMapper.readValue(message, new TypeReference<>() {});
+                    objectMapper.readValue(message, new com.fasterxml.jackson.core.type.TypeReference<EventEnvelope<NotificationPayload>>() {});
 
-            // 원본 메시지 로그
-            System.out.println("📩 수신한 원본 메시지: " + message);
-
-            // envelope 전체 확인
-            System.out.println("📝 역직렬화된 EventEnvelope: " + envelope);
-
-            // 개별 필드 확인
-            System.out.println("➡️ Payload: " + envelope.getPayload());
-
-            // 실제 서비스 호출
             notificationService.handleNotificationEvent(envelope);
-
-            System.out.println("✅ Kafka 이벤트 처리 완료");
         } catch (Exception e) {
-            System.err.println("⚠️ Kafka 역직렬화 실패: " + e.getMessage());
+            // Consumer 처리 실패 → DLQ
+            kafkaTemplate.send(DLQ_TOPIC, message);
+            System.err.println("[DLQ] moved due to Consumer error: " + e.getMessage());
         }
     }
-
 }

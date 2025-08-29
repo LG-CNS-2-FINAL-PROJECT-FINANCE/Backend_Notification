@@ -33,7 +33,11 @@ public class Notification {
     @Column(name = "notification_type", nullable = false)
     private NotificationType notificationType;
 
-    // 알림 내용
+    //알림 제목
+    @Column(name = "title", nullable = false, length = 1000)
+    private String title;
+
+    //알림 내용
     @Column(name = "message", nullable = false, length = 2000)
     private String message;
 

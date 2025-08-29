@@ -1,34 +1,40 @@
 package com.ddiring.Backend_Notification.controller;
 
-import com.ddiring.Backend_Notification.common.util.GatewayRequestHeaderUtils;
-import com.ddiring.Backend_Notification.dto.request.MarkAsReadRequest;
+import com.ddiring.Backend_Notification.common.exception.ApplicationException;
+import com.ddiring.Backend_Notification.common.exception.ErrorCode;
 import com.ddiring.Backend_Notification.dto.response.UserNotificationResponse;
+import com.ddiring.Backend_Notification.dto.request.MarkAsReadRequest;
 import com.ddiring.Backend_Notification.service.NotificationService;
+import com.ddiring.Backend_Notification.common.util.GatewayRequestHeaderUtils;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.Collections;
 import java.util.List;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/notification")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:3000")
 public class NotificationController {
+
     private final NotificationService notificationService;
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream() {
-        List<String> userSeqs;
-        try {
-            userSeqs = List.of(GatewayRequestHeaderUtils.getUserSeq());
-        } catch (Exception e) {
-            userSeqs = List.of("1", "2", "3", "4", "5"); //테스트용
+    public SseEmitter stream(@RequestParam(value = "userSeq", required = false) List<String> userSeqList) {
+        if (userSeqList == null || userSeqList.isEmpty()) {
+            String userSeq = GatewayRequestHeaderUtils.getUserSeq();
+            if (userSeq == null || userSeq.isBlank()) {
+                throw new ApplicationException(ErrorCode.UNAUTHORIZED);
+            }
+            userSeqList = Collections.singletonList(userSeq);
         }
 
-        return notificationService.connectForUsers(userSeqs);
+        return notificationService.connectForUsers(userSeqList);
     }
 
     @GetMapping("/list")
@@ -43,5 +49,4 @@ public class NotificationController {
         notificationService.markAsRead(userSeq, request);
         return ResponseEntity.ok().build();
     }
-
 }

@@ -11,58 +11,108 @@ import com.ddiring.Backend_Notification.kafka.EventEnvelope;
 import com.ddiring.Backend_Notification.kafka.NotificationPayload;
 import com.ddiring.Backend_Notification.repository.NotificationRepository;
 import com.ddiring.Backend_Notification.repository.UserNotificationRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
+
     private final NotificationRepository notificationRepository;
     private final UserNotificationRepository userNotificationRepository;
+    private final ObjectMapper objectMapper;
+    private final KafkaTemplate<String, String> kafkaTemplate;
 
+    private static final String DLQ_TOPIC = "notification-dlq";
+
+    //userSeq별 SSE Emitter 저장
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
-    //SSE 연결
-    public SseEmitter connectForUsers(List<String> userSeqs) {
+    //단일 사용자 SSE 연결
+    public SseEmitter connectForUser(String userSeq) {
+        return connectForUsers(List.of(userSeq));
+    }
+
+    //다수 사용자 SSE 연결
+    public SseEmitter connectForUsers(List<String> userSeqList) {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
 
-        for (String userSeq : userSeqs) {
+        for (String userSeq : userSeqList) {
             emitters.computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>()).add(emitter);
         }
 
-        emitter.onCompletion(() -> userSeqs.forEach(seq -> emitters.getOrDefault(seq, List.of()).remove(emitter)));
-        emitter.onTimeout(() -> userSeqs.forEach(seq -> emitters.getOrDefault(seq, List.of()).remove(emitter)));
+        emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
+        emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
+
+        try {
+            emitter.send(SseEmitter.event().name("connect").data("connected"));
+        } catch (Exception e) {
+            emitter.completeWithError(e);
+        }
 
         return emitter;
     }
 
-    //SSE 전송
-    public void sendNotification(String userSeq, NotificationPayload payload) {
-        List<SseEmitter> userEmitters = emitters.get(userSeq);
-        if (userEmitters == null) return;
+    private void removeEmitters(List<String> userSeqList, SseEmitter emitter) {
+        for (String seq : userSeqList) {
+            emitters.getOrDefault(seq, List.of()).remove(emitter);
+        }
+    }
 
-        for (SseEmitter emitter : userEmitters) {
-            try {
-                emitter.send(SseEmitter.event()
-                        .name("Notification")
-                        .data(payload));
-            } catch (Exception e) {
-                //실패하면 emitter 제거
-                userEmitters.remove(emitter);
+    //알림 전송(SSE) userSeq에 연결이 없으면 DLQ로 이동
+    public void sendNotification(List<String> userSeqList, NotificationPayload payload) {
+        for (String userSeq : userSeqList) {
+            List<SseEmitter> userEmitters = emitters.get(userSeq);
+            if (userEmitters == null || userEmitters.isEmpty()) {
+                sendToDLQ(payload);
+                continue;
+            }
+
+            for (SseEmitter emitter : new ArrayList<>(userEmitters)) {
+                try {
+                    String json = objectMapper.writeValueAsString(payload);
+                    emitter.send(SseEmitter.event().name("Notification").data(json));
+                } catch (Exception e) {
+                    userEmitters.remove(emitter);
+                    emitter.completeWithError(e);
+                    sendToDLQ(payload);
+                }
             }
         }
     }
 
-    //알림 저장 + 전송
+    //SSE 전송 실패 시 DLQ
+    private void sendToDLQ(NotificationPayload payload) {
+        try {
+            EventEnvelope<NotificationPayload> envelope = EventEnvelope.<NotificationPayload>builder()
+                    .eventId(UUID.randomUUID().toString())
+                    .timestamp(Instant.now())
+                    .payload(payload)
+                    .build();
+            String json = objectMapper.writeValueAsString(envelope);
+            kafkaTemplate.send(DLQ_TOPIC, json);
+        } catch (Exception e) {
+            System.err.println("[DLQ] 전송 실패: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Kafka Consumer 또는 서비스에서 호출
+     * - Notification DB 저장
+     * - UserNotification DB 저장
+     * - SSE 전송
+     * - 실패 시 DLQ 이동
+     */
     @Transactional
     public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
         NotificationPayload payload = envelope.getPayload();
@@ -72,38 +122,36 @@ public class NotificationService {
         Notification notification = Notification.builder()
                 .eventId(envelope.getEventId())
                 .notificationType(NotificationType.valueOf(payload.getNotificationType()))
+                .title(payload.getTitle())
                 .message(payload.getMessage())
-                .createdId("system")
-                .createdAt(now)
-                .updatedId("system")
-                .updatedAt(now)
+                .createdId("system").createdAt(now)
+                .updatedId("system").updatedAt(now)
                 .build();
         notificationRepository.save(notification);
 
-        //UserNotification 저장 + SSE 전송
-        for (String userSeq : payload.getUserSeqs()) {
-            UserNotification userNotification = UserNotification.builder()
+        //UserNotification 저장
+        List<String> userSeqList = payload.getUserSeq();
+        if (userSeqList == null || userSeqList.isEmpty()) return;
+
+        for (String userSeq : userSeqList) {
+            UserNotification un = UserNotification.builder()
                     .notification(notification)
                     .userSeq(userSeq)
                     .notificationStatus(NotificationStatus.UNREAD)
                     .sentAt(now)
-                    .createdId("system")
-                    .createdAt(now)
-                    .updatedId("system")
-                    .updatedAt(now)
+                    .createdId("system").createdAt(now)
+                    .updatedId("system").updatedAt(now)
                     .build();
-            userNotificationRepository.save(userNotification);
-
-            //사용자별 SSE 전송
-            sendNotification(userSeq, payload);
+            userNotificationRepository.save(un);
         }
+
+        //SSE 전송
+        sendNotification(userSeqList, payload);
     }
 
-    //사용자 알림 리스트 조회
+    //사용자 알림 조회
     public List<UserNotificationResponse> getUserNotifications(String userSeq) {
-        List<UserNotification> notifications = userNotificationRepository.findAllByUserSeq(userSeq);
-
-        return notifications.stream()
+        return userNotificationRepository.findAllWithNotificationByUserSeq(userSeq).stream()
                 .map(n -> UserNotificationResponse.builder()
                         .userNotificationSeq(n.getUserNotificationSeq())
                         .userSeq(n.getUserSeq())
@@ -113,6 +161,7 @@ public class NotificationService {
                         .notification(NotificationResponse.builder()
                                 .notificationSeq(n.getNotification().getNotificationSeq())
                                 .notificationType(n.getNotification().getNotificationType())
+                                .title(n.getNotification().getTitle())
                                 .message(n.getNotification().getMessage())
                                 .createdAt(n.getNotification().getCreatedAt())
                                 .build())
@@ -122,14 +171,14 @@ public class NotificationService {
 
     //알림 읽음 처리
     public void markAsRead(String userSeq, MarkAsReadRequest request) {
-        List<UserNotification> notifications =
+        List<UserNotification> list =
                 userNotificationRepository.findAllByUserSeqAndIds(userSeq, request.getUserNotificationSeqs());
 
         LocalDateTime now = LocalDateTime.now();
-        notifications.forEach(n -> {
+        list.forEach(n -> {
             n.setNotificationStatus(NotificationStatus.READ);
             n.setReadAt(now);
         });
+        userNotificationRepository.saveAll(list);
     }
-
 }
