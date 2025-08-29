@@ -2,6 +2,7 @@
 def APP_NAME
 def APP_VERSION
 def DOCKER_IMAGE_NAME
+def PROD_IMAGE_NAME
 
 pipeline {
     agent any
@@ -12,7 +13,7 @@ pipeline {
         MANIFEST_DIR = 'helm_chart'
         REGISTRY_HOST = credentials('DEV_REGISTRY')
         PROD_REGISTRY = credentials('PROD_REGISTRY')
-		SERVICE_NAME = 'notification'
+        SERVICE_NAME = 'notification'
     }
 
     tools {
