@@ -25,15 +25,22 @@ public class NotificationController {
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream() {
+        log.info("🚀 [Controller] /api/notification/stream 호출됨");
         String userSeq = GatewayRequestHeaderUtils.getUserSeq();
-        log.info("SSE 연결 시도, userSeq={}", userSeq);
+        log.info("🔥 [SSE 요청 수신] userSeq={}", userSeq);
+
+        if (userSeq == null) {
+            log.warn("⚠️ GatewayRequestHeaderUtils.getUserSeq() 값이 null임. 헤더에서 못 읽어옴");
+        }
 
         return notificationService.connectForUsers(Collections.singletonList(userSeq));
     }
 
+
     @GetMapping("/list")
     public ResponseEntity<List<UserNotificationResponse>> getUserNotifications() {
         String userSeq = GatewayRequestHeaderUtils.getUserSeq();
+        log.info(userSeq);
         return ResponseEntity.ok(notificationService.getUserNotifications(userSeq));
     }
 

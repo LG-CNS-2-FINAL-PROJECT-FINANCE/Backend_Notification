@@ -14,6 +14,7 @@ import com.ddiring.Backend_Notification.repository.UserNotificationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -24,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
@@ -44,19 +46,34 @@ public class NotificationService {
     }
 
     //다수 사용자 SSE 연결
+    //다수 사용자 SSE 연결
     public SseEmitter connectForUsers(List<String> userSeqList) {
+        log.info("🔌 [SSE 연결 시도] 대상 userSeqList={}", userSeqList);
+
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
 
         for (String userSeq : userSeqList) {
-            emitters.computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>()).add(emitter);
+            emitters
+                    .computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>())
+                    .add(emitter);
+            log.info("✅ emitter 등록 완료 userSeq={}", userSeq);
         }
 
-        emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
-        emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
+        emitter.onCompletion(() -> {
+            log.info("🛑 [SSE 연결 종료] userSeqList={}", userSeqList);
+            removeEmitters(userSeqList, emitter);
+        });
+
+        emitter.onTimeout(() -> {
+            log.warn("⌛ [SSE 타임아웃 발생] userSeqList={}", userSeqList);
+            removeEmitters(userSeqList, emitter);
+        });
 
         try {
             emitter.send(SseEmitter.event().name("connect").data("connected"));
+            log.info("📡 [SSE 연결 성공 이벤트 전송] userSeqList={}", userSeqList);
         } catch (Exception e) {
+            log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", userSeqList, e.getMessage(), e);
             emitter.completeWithError(e);
         }
 
