@@ -101,7 +101,14 @@ public class NotificationService {
 
             for (SseEmitter emitter : new ArrayList<>(userEmitters)) {
                 try {
-                    String json = objectMapper.writeValueAsString(payload);
+                    // payload를 EventEnvelope 형태로 감싸서 전송
+                    EventEnvelope<NotificationPayload> envelope = EventEnvelope.<NotificationPayload>builder()
+                            .eventId(UUID.randomUUID().toString())
+                            .timestamp(Instant.now())
+                            .payload(payload)
+                            .build();
+
+                    String json = objectMapper.writeValueAsString(envelope);
                     emitter.send(SseEmitter.event().name("Notification").data(json));
                 } catch (Exception e) {
                     userEmitters.remove(emitter);
