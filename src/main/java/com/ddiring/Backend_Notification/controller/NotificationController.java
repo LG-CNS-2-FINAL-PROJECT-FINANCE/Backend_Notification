@@ -24,8 +24,10 @@ public class NotificationController {
     private final NotificationService notificationService;
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestHeader("userSeq") String userSeq) {
+    public SseEmitter stream() {
+        String userSeq = GatewayRequestHeaderUtils.getUserSeq();
         log.info("SSE 연결 시도, userSeq={}", userSeq);
+
         return notificationService.connectForUsers(Collections.singletonList(userSeq));
     }
 
