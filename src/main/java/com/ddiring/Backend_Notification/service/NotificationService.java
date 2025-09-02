@@ -45,29 +45,19 @@ public class NotificationService {
         return connectForUsers(List.of(userSeq));
     }
 
-    //다수 사용자 SSE 연결
-    //다수 사용자 SSE 연결
     public SseEmitter connectForUsers(List<String> userSeqList) {
         log.info("🔌 [SSE 연결 시도] 대상 userSeqList={}", userSeqList);
 
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
 
         for (String userSeq : userSeqList) {
-            emitters
-                    .computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>())
-                    .add(emitter);
+            emitters.computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>()).add(emitter);
             log.info("✅ emitter 등록 완료 userSeq={}", userSeq);
         }
 
-        emitter.onCompletion(() -> {
-            log.info("🛑 [SSE 연결 종료] userSeqList={}", userSeqList);
-            removeEmitters(userSeqList, emitter);
-        });
-
-        emitter.onTimeout(() -> {
-            log.warn("⌛ [SSE 타임아웃 발생] userSeqList={}", userSeqList);
-            removeEmitters(userSeqList, emitter);
-        });
+        // 연결 종료 / 타임아웃 이벤트
+        emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
+        emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
 
         try {
             emitter.send(SseEmitter.event().name("connect").data("connected"));
@@ -76,6 +66,20 @@ public class NotificationService {
             log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", userSeqList, e.getMessage(), e);
             emitter.completeWithError(e);
         }
+
+        // Heartbeat 전송 (30초마다)
+        Timer heartbeatTimer = new Timer();
+        heartbeatTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                try {
+                    emitter.send(SseEmitter.event().name("heartbeat").data("ping"));
+                } catch (Exception e) {
+                    emitter.complete();
+                    heartbeatTimer.cancel();
+                }
+            }
+        }, 0, 30_000);
 
         return emitter;
     }

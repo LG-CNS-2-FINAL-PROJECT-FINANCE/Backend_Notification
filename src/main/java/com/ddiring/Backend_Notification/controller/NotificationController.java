@@ -36,7 +36,6 @@ public class NotificationController {
         return notificationService.connectForUsers(Collections.singletonList(userSeq));
     }
 
-
     @GetMapping("/list")
     public ResponseEntity<List<UserNotificationResponse>> getUserNotifications() {
         String userSeq = GatewayRequestHeaderUtils.getUserSeq();
