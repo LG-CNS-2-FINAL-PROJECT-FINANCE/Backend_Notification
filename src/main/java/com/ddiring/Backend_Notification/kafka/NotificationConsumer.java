@@ -20,8 +20,9 @@ public class NotificationConsumer {
     @KafkaListener(topics = MAIN_TOPIC, groupId = "notification-group")
     public void consume(String message) {
         try {
-            NotificationEvent event = objectMapper.readValue(message, NotificationEvent.class);
-            notificationService.handleNotificationEvent(event);
+            log.info(message);
+//            NotificationEvent event = objectMapper.readValue(message, NotificationEvent.class);
+//            notificationService.handleNotificationEvent(event);
         } catch (Exception e) {
             log.error("Consumer 처리 실패: message={}, error={}", message, e.getMessage(), e);
         }
