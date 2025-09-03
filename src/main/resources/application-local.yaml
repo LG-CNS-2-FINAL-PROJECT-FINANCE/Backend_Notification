@@ -20,16 +20,16 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MariaDBDialect
 
-  kafka:
-    bootstrap-servers: localhost:9092
-    admin:
-      auto-create: true
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
-    consumer:
-      group-id: notification-group
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      properties:
-        spring.json.trusted.packages: \"*\"
+kafka:
+  bootstrap-servers: localhost:9092
+  listener:
+    ack-mode: manual_immediate  # 수동 ack 모드
+  consumer:
+    group-id: notification-group
+    key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+    enable-auto-commit: false
+    auto-offset-reset: latest
+    properties:
+      spring.json.trusted.packages: "*"
+      spring.json.use.type.headers: false  # 헤더 타입 무시

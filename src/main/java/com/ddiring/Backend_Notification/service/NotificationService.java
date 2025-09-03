@@ -7,11 +7,9 @@ import com.ddiring.Backend_Notification.dto.response.NotificationResponse;
 import com.ddiring.Backend_Notification.dto.response.UserNotificationResponse;
 import com.ddiring.Backend_Notification.enums.NotificationStatus;
 import com.ddiring.Backend_Notification.enums.NotificationType;
-import com.ddiring.Backend_Notification.kafka.EventEnvelope;
-import com.ddiring.Backend_Notification.kafka.NotificationPayload;
+import com.ddiring.Backend_Notification.kafka.NotificationEvent;
 import com.ddiring.Backend_Notification.repository.NotificationRepository;
 import com.ddiring.Backend_Notification.repository.UserNotificationRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +17,6 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,10 +29,7 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserNotificationRepository userNotificationRepository;
-    private final ObjectMapper objectMapper;
-    private final KafkaTemplate<String, String> kafkaTemplate;
-
-    private static final String DLQ_TOPIC = "notification-dlq";
+    private final KafkaTemplate<String, Object> kafkaTemplate;  // Object 타입 사용
 
     // userSeq별 SSE Emitter 저장
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
@@ -56,15 +50,8 @@ public class NotificationService {
             log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, emitters.get(userSeq).size());
         }
 
-        // 연결 종료 / 타임아웃 이벤트
-        emitter.onCompletion(() -> {
-            log.info("🗑 [SSE 연결 종료 이벤트] userSeqList={}", userSeqList);
-            removeEmitters(userSeqList, emitter);
-        });
-        emitter.onTimeout(() -> {
-            log.warn("⏱ [SSE 연결 타임아웃] userSeqList={}", userSeqList);
-            removeEmitters(userSeqList, emitter);
-        });
+        emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
+        emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
 
         try {
             emitter.send(SseEmitter.event().name("connect").data("connected"));
@@ -73,22 +60,6 @@ public class NotificationService {
             log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", userSeqList, e.getMessage(), e);
             emitter.completeWithError(e);
         }
-
-        // Heartbeat 전송 (15초마다)
-        Timer heartbeatTimer = new Timer();
-        heartbeatTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                try {
-                    emitter.send(SseEmitter.event().name("heartbeat").data("ping"));
-                    log.debug("💓 [heartbeat 전송] userSeqList={}, emitter={}", userSeqList, emitter);
-                } catch (Exception e) {
-                    log.error("❌ [heartbeat 전송 실패] userSeqList={}, error={}", userSeqList, e.getMessage());
-                    emitter.complete();
-                    heartbeatTimer.cancel();
-                }
-            }
-        }, 0, 15_000);
 
         return emitter;
     }
@@ -101,98 +72,64 @@ public class NotificationService {
         }
     }
 
-    // 알림 전송(SSE) userSeq에 연결이 없으면 DLQ로 이동
-    public void sendNotification(List<String> userSeqList, NotificationPayload payload) {
-        log.info("✉️ [알림 전송 시작] userSeqList={}, payload={}", userSeqList, payload);
+    // 알림 전송(SSE)
+    public void sendNotification(List<String> userSeqList, NotificationEvent event) {
+        log.info("✉️ [알림 전송 시작] userSeqList={}, event={}", userSeqList, event);
 
         for (String userSeq : userSeqList) {
             List<SseEmitter> userEmitters = emitters.get(userSeq);
-            log.info("🔎 [emitters 조회] userSeq={}, emitter 수={}", userSeq, userEmitters != null ? userEmitters.size() : 0);
-
             if (userEmitters == null || userEmitters.isEmpty()) {
-                log.warn("⚠️ [SSE 미연결 사용자] userSeq={} → DLQ 이동", userSeq);
-                sendToDLQ(payload);
+                log.warn("⚠️ [SSE 미연결 사용자] userSeq={} → 알림 미전송", userSeq);
                 continue;
             }
 
             for (SseEmitter emitter : new ArrayList<>(userEmitters)) {
                 try {
-                    EventEnvelope<NotificationPayload> envelope = EventEnvelope.<NotificationPayload>builder()
-                            .eventId(UUID.randomUUID().toString())
-                            .timestamp(Instant.now())
-                            .payload(payload)
-                            .build();
-
-                    String json = objectMapper.writeValueAsString(envelope);
-                    emitter.send(SseEmitter.event().name("Notification").data(json));
-                    log.info("📤 [SSE 전송 완료] userSeq={}, eventId={}, emitter={}, payload={}", userSeq, envelope.getEventId(), emitter, payload);
+                    emitter.send(SseEmitter.event().name("Notification").data(event));
+                    log.info("📤 [SSE 전송 완료] userSeq={}, eventId={}", userSeq, event.getEventId());
                 } catch (Exception e) {
                     log.error("❌ [SSE 전송 실패] userSeq={}, error={}", userSeq, e.getMessage(), e);
                     userEmitters.remove(emitter);
                     emitter.completeWithError(e);
-                    sendToDLQ(payload);
                 }
             }
         }
     }
 
-    // SSE 전송 실패 시 DLQ
-    private void sendToDLQ(NotificationPayload payload) {
-        try {
-            EventEnvelope<NotificationPayload> envelope = EventEnvelope.<NotificationPayload>builder()
-                    .eventId(UUID.randomUUID().toString())
-                    .timestamp(Instant.now())
-                    .payload(payload)
-                    .build();
-            String json = objectMapper.writeValueAsString(envelope);
-            kafkaTemplate.send(DLQ_TOPIC, json);
-            log.warn("📦 [DLQ 전송 완료] payload={}", payload);
-        } catch (Exception e) {
-            log.error("❌ [DLQ 전송 실패] payload={}, error={}", payload, e.getMessage(), e);
-        }
-    }
-
     @Transactional
-    public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
-        NotificationPayload payload = envelope.getPayload();
+    public void handleNotificationEvent(NotificationEvent event) {
         LocalDateTime now = LocalDateTime.now();
-
-        log.info("🎯 [Kafka 이벤트 수신] eventId={}, payload={}", envelope.getEventId(), payload);
+        log.info("🎯 [Kafka 이벤트 수신] eventId={}, event={}", event.getEventId(), event);
 
         // Notification 저장
         Notification notification = Notification.builder()
-                .eventId(envelope.getEventId())
-                .notificationType(NotificationType.valueOf(payload.getNotificationType()))
-                .title(payload.getTitle())
-                .message(payload.getMessage())
+                .eventId(event.getEventId())
+                .notificationType(NotificationType.valueOf(event.getNotificationType()))
+                .title(event.getTitle())
+                .message(event.getMessage())
                 .createdId("system").createdAt(now)
                 .updatedId("system").updatedAt(now)
                 .build();
         notificationRepository.save(notification);
-        log.info("💾 [Notification 저장 완료] eventId={}", envelope.getEventId());
 
         // UserNotification 저장
-        List<String> userSeqList = payload.getUserSeq();
-        if (userSeqList == null || userSeqList.isEmpty()) {
-            log.warn("⚠️ [UserNotification 대상 없음] eventId={}", envelope.getEventId());
-            return;
-        }
-
-        for (String userSeq : userSeqList) {
-            UserNotification un = UserNotification.builder()
-                    .notification(notification)
-                    .userSeq(userSeq)
-                    .notificationStatus(NotificationStatus.UNREAD)
-                    .sentAt(now)
-                    .createdId("system").createdAt(now)
-                    .updatedId("system").updatedAt(now)
-                    .build();
-            userNotificationRepository.save(un);
-            log.info("💾 [UserNotification 저장 완료] userSeq={}, eventId={}", userSeq, envelope.getEventId());
+        List<String> userSeqList = event.getUserSeq();
+        if (userSeqList != null && !userSeqList.isEmpty()) {
+            for (String userSeq : userSeqList) {
+                UserNotification un = UserNotification.builder()
+                        .notification(notification)
+                        .userSeq(userSeq)
+                        .notificationStatus(NotificationStatus.UNREAD)
+                        .sentAt(now)
+                        .createdId("system").createdAt(now)
+                        .updatedId("system").updatedAt(now)
+                        .build();
+                userNotificationRepository.save(un);
+            }
         }
 
         // SSE 전송
-        sendNotification(userSeqList, payload);
+        sendNotification(userSeqList, event);
     }
 
     public List<UserNotificationResponse> getUserNotifications(String userSeq) {
