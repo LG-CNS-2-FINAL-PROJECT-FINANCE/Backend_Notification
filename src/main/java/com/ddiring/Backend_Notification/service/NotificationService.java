@@ -37,14 +37,15 @@ public class NotificationService {
 
     private static final String DLQ_TOPIC = "notification-dlq";
 
-    //userSeq별 SSE Emitter 저장
+    // userSeq별 SSE Emitter 저장
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
-    //단일 사용자 SSE 연결
+    // 단일 사용자 SSE 연결
     public SseEmitter connectForUser(String userSeq) {
         return connectForUsers(List.of(userSeq));
     }
 
+    // 다중 사용자 SSE 연결
     public SseEmitter connectForUsers(List<String> userSeqList) {
         log.info("🔌 [SSE 연결 시도] 대상 userSeqList={}", userSeqList);
 
@@ -56,8 +57,14 @@ public class NotificationService {
         }
 
         // 연결 종료 / 타임아웃 이벤트
-        emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
-        emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
+        emitter.onCompletion(() -> {
+            log.info("🗑 [SSE 연결 종료 이벤트] userSeqList={}", userSeqList);
+            removeEmitters(userSeqList, emitter);
+        });
+        emitter.onTimeout(() -> {
+            log.warn("⏱ [SSE 연결 타임아웃] userSeqList={}", userSeqList);
+            removeEmitters(userSeqList, emitter);
+        });
 
         try {
             emitter.send(SseEmitter.event().name("connect").data("connected"));
@@ -67,19 +74,21 @@ public class NotificationService {
             emitter.completeWithError(e);
         }
 
-        // Heartbeat 전송 (30초마다)
+        // Heartbeat 전송 (15초마다)
         Timer heartbeatTimer = new Timer();
         heartbeatTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 try {
                     emitter.send(SseEmitter.event().name("heartbeat").data("ping"));
+                    log.debug("💓 [heartbeat 전송] userSeqList={}", userSeqList);
                 } catch (Exception e) {
+                    log.error("❌ [heartbeat 전송 실패] userSeqList={}, error={}", userSeqList, e.getMessage());
                     emitter.complete();
                     heartbeatTimer.cancel();
                 }
             }
-        }, 0, 30_000);
+        }, 0, 15_000);
 
         return emitter;
     }
@@ -87,21 +96,24 @@ public class NotificationService {
     private void removeEmitters(List<String> userSeqList, SseEmitter emitter) {
         for (String seq : userSeqList) {
             emitters.getOrDefault(seq, List.of()).remove(emitter);
+            log.info("🗑 [emitter 제거] userSeq={}", seq);
         }
     }
 
-    //알림 전송(SSE) userSeq에 연결이 없으면 DLQ로 이동
+    // 알림 전송(SSE) userSeq에 연결이 없으면 DLQ로 이동
     public void sendNotification(List<String> userSeqList, NotificationPayload payload) {
+        log.info("✉️ [알림 전송 시작] userSeqList={}, payload={}", userSeqList, payload);
+
         for (String userSeq : userSeqList) {
             List<SseEmitter> userEmitters = emitters.get(userSeq);
             if (userEmitters == null || userEmitters.isEmpty()) {
+                log.warn("⚠️ [SSE 미연결 사용자] userSeq={} → DLQ 이동", userSeq);
                 sendToDLQ(payload);
                 continue;
             }
 
             for (SseEmitter emitter : new ArrayList<>(userEmitters)) {
                 try {
-                    // payload를 EventEnvelope 형태로 감싸서 전송
                     EventEnvelope<NotificationPayload> envelope = EventEnvelope.<NotificationPayload>builder()
                             .eventId(UUID.randomUUID().toString())
                             .timestamp(Instant.now())
@@ -110,7 +122,9 @@ public class NotificationService {
 
                     String json = objectMapper.writeValueAsString(envelope);
                     emitter.send(SseEmitter.event().name("Notification").data(json));
+                    log.info("📤 [SSE 전송 완료] userSeq={}, eventId={}, payload={}", userSeq, envelope.getEventId(), payload);
                 } catch (Exception e) {
+                    log.error("❌ [SSE 전송 실패] userSeq={}, error={}", userSeq, e.getMessage(), e);
                     userEmitters.remove(emitter);
                     emitter.completeWithError(e);
                     sendToDLQ(payload);
@@ -119,7 +133,7 @@ public class NotificationService {
         }
     }
 
-    //SSE 전송 실패 시 DLQ
+    // SSE 전송 실패 시 DLQ
     private void sendToDLQ(NotificationPayload payload) {
         try {
             EventEnvelope<NotificationPayload> envelope = EventEnvelope.<NotificationPayload>builder()
@@ -129,8 +143,9 @@ public class NotificationService {
                     .build();
             String json = objectMapper.writeValueAsString(envelope);
             kafkaTemplate.send(DLQ_TOPIC, json);
+            log.warn("📦 [DLQ 전송 완료] payload={}", payload);
         } catch (Exception e) {
-            System.err.println("[DLQ] 전송 실패: " + e.getMessage());
+            log.error("❌ [DLQ 전송 실패] payload={}, error={}", payload, e.getMessage(), e);
         }
     }
 
@@ -146,7 +161,9 @@ public class NotificationService {
         NotificationPayload payload = envelope.getPayload();
         LocalDateTime now = LocalDateTime.now();
 
-        //Notification 저장
+        log.info("🎯 [Kafka 이벤트 수신] eventId={}, payload={}", envelope.getEventId(), payload);
+
+        // Notification 저장
         Notification notification = Notification.builder()
                 .eventId(envelope.getEventId())
                 .notificationType(NotificationType.valueOf(payload.getNotificationType()))
@@ -156,10 +173,14 @@ public class NotificationService {
                 .updatedId("system").updatedAt(now)
                 .build();
         notificationRepository.save(notification);
+        log.info("💾 [Notification 저장 완료] eventId={}", envelope.getEventId());
 
-        //UserNotification 저장
+        // UserNotification 저장
         List<String> userSeqList = payload.getUserSeq();
-        if (userSeqList == null || userSeqList.isEmpty()) return;
+        if (userSeqList == null || userSeqList.isEmpty()) {
+            log.warn("⚠️ [UserNotification 대상 없음] eventId={}", envelope.getEventId());
+            return;
+        }
 
         for (String userSeq : userSeqList) {
             UserNotification un = UserNotification.builder()
@@ -171,13 +192,14 @@ public class NotificationService {
                     .updatedId("system").updatedAt(now)
                     .build();
             userNotificationRepository.save(un);
+            log.info("💾 [UserNotification 저장 완료] userSeq={}, eventId={}", userSeq, envelope.getEventId());
         }
 
-        //SSE 전송
+        // SSE 전송
         sendNotification(userSeqList, payload);
     }
 
-    //사용자 알림 조회
+    // 사용자 알림 조회
     public List<UserNotificationResponse> getUserNotifications(String userSeq) {
         return userNotificationRepository.findAllWithNotificationByUserSeq(userSeq).stream()
                 .map(n -> UserNotificationResponse.builder()
@@ -197,7 +219,7 @@ public class NotificationService {
                 .toList();
     }
 
-    //알림 읽음 처리
+    // 알림 읽음 처리
     public void markAsRead(String userSeq, MarkAsReadRequest request) {
         List<UserNotification> list =
                 userNotificationRepository.findAllByUserSeqAndIds(userSeq, request.getUserNotificationSeqs());
@@ -208,5 +230,6 @@ public class NotificationService {
             n.setReadAt(now);
         });
         userNotificationRepository.saveAll(list);
+        log.info("✅ [알림 읽음 처리 완료] userSeq={}, count={}", userSeq, list.size());
     }
 }
