@@ -53,7 +53,7 @@ public class NotificationService {
 
         for (String userSeq : userSeqList) {
             emitters.computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>()).add(emitter);
-            log.info("✅ emitter 등록 완료 userSeq={}", userSeq);
+            log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, emitters.get(userSeq).size());
         }
 
         // 연결 종료 / 타임아웃 이벤트
@@ -81,7 +81,7 @@ public class NotificationService {
             public void run() {
                 try {
                     emitter.send(SseEmitter.event().name("heartbeat").data("ping"));
-                    log.debug("💓 [heartbeat 전송] userSeqList={}", userSeqList);
+                    log.debug("💓 [heartbeat 전송] userSeqList={}, emitter={}", userSeqList, emitter);
                 } catch (Exception e) {
                     log.error("❌ [heartbeat 전송 실패] userSeqList={}, error={}", userSeqList, e.getMessage());
                     emitter.complete();
@@ -95,8 +95,9 @@ public class NotificationService {
 
     private void removeEmitters(List<String> userSeqList, SseEmitter emitter) {
         for (String seq : userSeqList) {
-            emitters.getOrDefault(seq, List.of()).remove(emitter);
-            log.info("🗑 [emitter 제거] userSeq={}", seq);
+            List<SseEmitter> list = emitters.getOrDefault(seq, List.of());
+            list.remove(emitter);
+            log.info("🗑 [emitter 제거] userSeq={}, 남은 emitter 수={}", seq, list.size());
         }
     }
 
@@ -106,6 +107,8 @@ public class NotificationService {
 
         for (String userSeq : userSeqList) {
             List<SseEmitter> userEmitters = emitters.get(userSeq);
+            log.info("🔎 [emitters 조회] userSeq={}, emitter 수={}", userSeq, userEmitters != null ? userEmitters.size() : 0);
+
             if (userEmitters == null || userEmitters.isEmpty()) {
                 log.warn("⚠️ [SSE 미연결 사용자] userSeq={} → DLQ 이동", userSeq);
                 sendToDLQ(payload);
@@ -122,7 +125,7 @@ public class NotificationService {
 
                     String json = objectMapper.writeValueAsString(envelope);
                     emitter.send(SseEmitter.event().name("Notification").data(json));
-                    log.info("📤 [SSE 전송 완료] userSeq={}, eventId={}, payload={}", userSeq, envelope.getEventId(), payload);
+                    log.info("📤 [SSE 전송 완료] userSeq={}, eventId={}, emitter={}, payload={}", userSeq, envelope.getEventId(), emitter, payload);
                 } catch (Exception e) {
                     log.error("❌ [SSE 전송 실패] userSeq={}, error={}", userSeq, e.getMessage(), e);
                     userEmitters.remove(emitter);
@@ -149,13 +152,6 @@ public class NotificationService {
         }
     }
 
-    /**
-     * Kafka Consumer 또는 서비스에서 호출
-     * - Notification DB 저장
-     * - UserNotification DB 저장
-     * - SSE 전송
-     * - 실패 시 DLQ 이동
-     */
     @Transactional
     public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
         NotificationPayload payload = envelope.getPayload();
@@ -199,7 +195,6 @@ public class NotificationService {
         sendNotification(userSeqList, payload);
     }
 
-    // 사용자 알림 조회
     public List<UserNotificationResponse> getUserNotifications(String userSeq) {
         return userNotificationRepository.findAllWithNotificationByUserSeq(userSeq).stream()
                 .map(n -> UserNotificationResponse.builder()
@@ -219,7 +214,6 @@ public class NotificationService {
                 .toList();
     }
 
-    // 알림 읽음 처리
     public void markAsRead(String userSeq, MarkAsReadRequest request) {
         List<UserNotification> list =
                 userNotificationRepository.findAllByUserSeqAndIds(userSeq, request.getUserNotificationSeqs());

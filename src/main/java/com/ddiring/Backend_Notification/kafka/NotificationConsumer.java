@@ -1,12 +1,15 @@
 package com.ddiring.Backend_Notification.kafka;
 
 import com.ddiring.Backend_Notification.service.NotificationService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationConsumer {
@@ -22,13 +25,15 @@ public class NotificationConsumer {
     public void consume(String message) {
         try {
             EventEnvelope<NotificationPayload> envelope =
-                    objectMapper.readValue(message, new com.fasterxml.jackson.core.type.TypeReference<EventEnvelope<NotificationPayload>>() {});
+                    objectMapper.readValue(message, new TypeReference<EventEnvelope<NotificationPayload>>() {});
+            log.info("🎯 [Consumer 수신] eventId={}, payload={}", envelope.getEventId(), envelope.getPayload());
 
             notificationService.handleNotificationEvent(envelope);
         } catch (Exception e) {
-            // Consumer 처리 실패 → DLQ
+            log.error("❌ [Consumer 처리 실패] message={}, error={}", message, e.getMessage(), e);
             kafkaTemplate.send(DLQ_TOPIC, message);
-            System.err.println("[DLQ] moved due to Consumer error: " + e.getMessage());
+            log.warn("[DLQ 이동] message sent to DLQ");
         }
     }
+
 }
