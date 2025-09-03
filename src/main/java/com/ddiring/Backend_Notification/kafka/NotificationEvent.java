@@ -14,7 +14,6 @@ import java.util.List;
 @AllArgsConstructor
 public class NotificationEvent {
     private String eventId;
-    private Instant timestamp;
     private List<String> userSeq;         // 수신자
     private String notificationType;      // 알림 타입
     private String title;                 // 제목
