@@ -76,6 +76,7 @@ public class NotificationService {
 
         try {
             emitter.send(SseEmitter.event().name("connect").data("connected"));
+            log.info("🔗 [SSE 연결 성공] userSeq={}, emitter={}", userSeqList, emitter);
         } catch (Exception e) {
             log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", userSeqList, e.getMessage(), e);
             emitter.completeWithError(e);
@@ -170,7 +171,7 @@ public class NotificationService {
                                 .id(String.valueOf(System.currentTimeMillis()))
                                 .reconnectTime(15000);
                         emitter.send(event);
-                        log.info("💓 [SSE heartbeat 전송] userSeq={}", userSeq);
+                        log.info("💓 [SSE heartbeat 전송 성공] userSeq={}, emitter={}", userSeq, emitter);
                     } catch (Exception e) {
                         log.warn("❌ [SSE heartbeat 전송 실패] userSeq={}, error={}", userSeq, e.getMessage());
                         removeEmitters(Collections.singletonList(userSeq), emitter);
