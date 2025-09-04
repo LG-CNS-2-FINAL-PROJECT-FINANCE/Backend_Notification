@@ -27,12 +27,14 @@ import java.util.concurrent.*;
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
+
     private final NotificationRepository notificationRepository;
     private final UserNotificationRepository userNotificationRepository;
 
-    // userSeq별 SSE Emitter 저장
     private final Map<String, Set<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+    private static final int MAX_EMITTER_PER_USER = 3; // 다중 탭 허용 시 최대 emitter 수 제한
 
     // SSE 연결
     public SseEmitter connectForUsers(List<String> userSeqList) {
@@ -42,12 +44,32 @@ public class NotificationService {
             emitters.computeIfAbsent(userSeq, k -> Collections.synchronizedSet(new HashSet<>()));
             Set<SseEmitter> userEmitters = emitters.get(userSeq);
 
-            // 기존 emitter는 그대로 두고 새 emitter만 추가
-            userEmitters.add(emitter);
+            // 1) 기존 emitter 모두 종료하고 제거 (중복 방지)
+            synchronized (userEmitters) {
+                Iterator<SseEmitter> it = userEmitters.iterator();
+                while (it.hasNext()) {
+                    SseEmitter e = it.next();
+                    try { e.complete(); } catch (Exception ignored) {}
+                    it.remove();
+                }
+
+                // 2) 새 emitter 등록
+                userEmitters.add(emitter);
+
+                // 3) 다중 탭 허용 시 max emitter 수 제한
+                if (userEmitters.size() > MAX_EMITTER_PER_USER) {
+                    Iterator<SseEmitter> overflowIt = userEmitters.iterator();
+                    while (userEmitters.size() > MAX_EMITTER_PER_USER && overflowIt.hasNext()) {
+                        SseEmitter old = overflowIt.next();
+                        try { old.complete(); } catch (Exception ignored) {}
+                        overflowIt.remove();
+                    }
+                }
+            }
+
             log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, userEmitters.size());
         }
 
-        // 완료/타임아웃/에러 시 제거
         emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
         emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
         emitter.onError((e) -> removeEmitters(userSeqList, emitter));
@@ -62,28 +84,26 @@ public class NotificationService {
         return emitter;
     }
 
-    // emitter 제거
     private void removeEmitters(List<String> userSeqList, SseEmitter emitter) {
         for (String seq : userSeqList) {
             Set<SseEmitter> userEmitters = emitters.get(seq);
             if (userEmitters != null) {
-                userEmitters.remove(emitter);
-                log.info("🗑 [emitter 제거] userSeq={}, 남은 emitter 수={}", seq, userEmitters.size());
-                if (userEmitters.isEmpty()) {
-                    emitters.remove(seq);
+                synchronized (userEmitters) {
+                    userEmitters.remove(emitter);
+                    log.info("🗑 [emitter 제거] userSeq={}, 남은 emitter 수={}", seq, userEmitters.size());
+                    if (userEmitters.isEmpty()) emitters.remove(seq);
                 }
             }
         }
     }
 
-    // Kafka Event 처리 DB저장 + SSE 전송
+    // Kafka Event 처리 + SSE 전송
     @Transactional
     public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
         NotificationPayload payload = envelope.getPayload();
         List<String> userSeqList = payload.getUserSeq();
         LocalDateTime now = LocalDateTime.now();
 
-        // Notification 저장
         Notification notification = Notification.builder()
                 .eventId(envelope.getEventId())
                 .notificationType(NotificationType.valueOf(payload.getNotificationType()))
@@ -94,7 +114,6 @@ public class NotificationService {
                 .build();
         notificationRepository.save(notification);
 
-        // UserNotification 저장
         if (userSeqList != null && !userSeqList.isEmpty()) {
             for (String userSeq : userSeqList) {
                 UserNotification un = UserNotification.builder()
@@ -109,19 +128,20 @@ public class NotificationService {
             }
         }
 
-        // SSE 전송
         sendNotification(userSeqList, envelope);
     }
 
-    // SSE 전송
     public void sendNotification(List<String> userSeqList, EventEnvelope<NotificationPayload> envelope) {
         for (String userSeq : userSeqList) {
             Set<SseEmitter> userEmitters = emitters.get(userSeq);
             if (userEmitters == null || userEmitters.isEmpty()) continue;
 
-            // 동기화된 Set 복사
-            List<SseEmitter> emittersToSend = new ArrayList<>(userEmitters);
-            for (SseEmitter emitter : emittersToSend) {
+            List<SseEmitter> copyEmitters;
+            synchronized (userEmitters) {
+                copyEmitters = new ArrayList<>(userEmitters);
+            }
+
+            for (SseEmitter emitter : copyEmitters) {
                 try {
                     emitter.send(SseEmitter.event().name("notification").data(envelope));
                 } catch (Exception e) {
@@ -133,16 +153,16 @@ public class NotificationService {
         }
     }
 
-    // 생성자나 init 메서드에서 스케줄러 시작
     @PostConstruct
     public void initHeartbeat() {
         scheduler.scheduleAtFixedRate(() -> {
             for (Map.Entry<String, Set<SseEmitter>> entry : emitters.entrySet()) {
                 String userSeq = entry.getKey();
                 Set<SseEmitter> userEmitters = entry.getValue();
+                List<SseEmitter> copyEmitters;
+                synchronized (userEmitters) { copyEmitters = new ArrayList<>(userEmitters); }
 
-                List<SseEmitter> emittersToSend = new ArrayList<>(userEmitters);
-                for (SseEmitter emitter : emittersToSend) {
+                for (SseEmitter emitter : copyEmitters) {
                     try {
                         SseEmitter.SseEventBuilder event = SseEmitter.event()
                                 .name("heartbeat")
@@ -162,11 +182,8 @@ public class NotificationService {
     }
 
     @PreDestroy
-    public void shutdownScheduler() {
-        scheduler.shutdown();
-    }
+    public void shutdownScheduler() { scheduler.shutdown(); }
 
-    // 유저 알림 조회
     public List<UserNotificationResponse> getUserNotifications(String userSeq) {
         return userNotificationRepository.findAllWithNotificationByUserSeq(userSeq).stream()
                 .map(n -> UserNotificationResponse.builder()
@@ -186,12 +203,10 @@ public class NotificationService {
                 .toList();
     }
 
-    // 읽음 처리
     public void markAsRead(String userSeq, MarkAsReadRequest request) {
         List<UserNotification> list =
                 userNotificationRepository.findAllByUserSeqAndIds(userSeq, request.getUserNotificationSeqs());
         LocalDateTime now = LocalDateTime.now();
-
         list.forEach(n -> {
             n.setNotificationStatus(NotificationStatus.READ);
             n.setReadAt(now);
