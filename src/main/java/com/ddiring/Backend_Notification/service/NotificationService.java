@@ -29,39 +29,44 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final UserNotificationRepository userNotificationRepository;
 
-    private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
+    // userSeq별 emitter (1명당 1개만 유지)
+    private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
 
     // SSE 연결
-    public SseEmitter connectForUsers(List<String> userSeqList) {
-        log.info("🔌 [SSE 연결 시도] 대상 userSeqList={}", userSeqList);
-        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
+    public SseEmitter connect(String userSeq) {
+        log.info("🔌 [SSE 연결 시도] userSeq={}", userSeq);
 
-        for (String userSeq : userSeqList) {
-            emitters.computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>()).add(emitter);
-            log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, emitters.get(userSeq).size());
+        // 기존 emitter 있으면 제거
+        if (emitters.containsKey(userSeq)) {
+            log.info("♻️ [기존 emitter 제거 후 재등록] userSeq={}", userSeq);
+            emitters.get(userSeq).complete();
+            emitters.remove(userSeq);
         }
 
-        emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
-        emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
+        // 새로운 emitter 등록
+        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
+        emitters.put(userSeq, emitter);
+
+        emitter.onCompletion(() -> removeEmitter(userSeq));
+        emitter.onTimeout(() -> removeEmitter(userSeq));
+        emitter.onError((e) -> removeEmitter(userSeq));
 
         try {
             emitter.send(SseEmitter.event().name("connect").data("connected"));
         } catch (Exception e) {
-            log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", userSeqList, e.getMessage(), e);
+            log.error("❌ [SSE 초기 연결 실패] userSeq={}, error={}", userSeq, e.getMessage(), e);
             emitter.completeWithError(e);
         }
 
         return emitter;
     }
 
-    private void removeEmitters(List<String> userSeqList, SseEmitter emitter) {
-        for (String seq : userSeqList) {
-            List<SseEmitter> list = emitters.getOrDefault(seq, List.of());
-            list.remove(emitter);
-        }
+    private void removeEmitter(String userSeq) {
+        emitters.remove(userSeq);
+        log.info("🗑 [emitter 제거] userSeq={}", userSeq);
     }
 
-    // Kafka Event 처리 DB저장 + SSE 전송
+    // Kafka Event 처리 (DB 저장 + SSE 전송)
     @Transactional
     public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
         NotificationPayload payload = envelope.getPayload();
@@ -101,16 +106,20 @@ public class NotificationService {
     // SSE 전송
     public void sendNotification(List<String> userSeqList, EventEnvelope<NotificationPayload> envelope) {
         for (String userSeq : userSeqList) {
-            List<SseEmitter> userEmitters = emitters.get(userSeq);
-            if (userEmitters == null || userEmitters.isEmpty()) continue;
+            SseEmitter emitter = emitters.get(userSeq);
 
-            for (SseEmitter emitter : new ArrayList<>(userEmitters)) {
-                try {
-                    emitter.send(SseEmitter.event().name("notification").data(envelope));
-                } catch (Exception e) {
-                    userEmitters.remove(emitter);
-                    emitter.completeWithError(e);
-                }
+            if (emitter == null) {
+                log.warn("⚠️ [SSE 미연결 사용자] userSeq={} → 알림 미전송", userSeq);
+                continue;
+            }
+
+            try {
+                emitter.send(SseEmitter.event().name("notification").data(envelope));
+                log.info("📤 [SSE 전송 완료] userSeq={}, title={}", userSeq, envelope.getPayload().getTitle());
+            } catch (Exception e) {
+                log.error("❌ [SSE 전송 실패] userSeq={}, error={}", userSeq, e.getMessage(), e);
+                removeEmitter(userSeq);
+                emitter.completeWithError(e);
             }
         }
     }

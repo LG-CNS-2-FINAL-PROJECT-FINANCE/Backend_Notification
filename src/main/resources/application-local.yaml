@@ -25,7 +25,7 @@ kafka:
   listener:
     ack-mode: manual_immediate  # 수동 ack 모드
   consumer:
-    group-id: notification-group
+    group-id: BackendNotification
     key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     enable-auto-commit: false
