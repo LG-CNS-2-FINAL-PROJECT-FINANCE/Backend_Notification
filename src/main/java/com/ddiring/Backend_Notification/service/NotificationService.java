@@ -152,6 +152,7 @@ public class NotificationService {
                 for (SseEmitter emitter : emittersToSend) {
                     try {
                         emitter.send(SseEmitter.event().name("heartbeat").data("ping"));
+                        log.info("💓 [SSE heartbeat 전송] userSeq={}", userSeq); // <- heartbeat 로그 추가
                     } catch (Exception e) {
                         log.warn("❌ [SSE heartbeat 전송 실패] userSeq={}, error={}", userSeq, e.getMessage());
                         removeEmitters(Collections.singletonList(userSeq), emitter);
@@ -166,7 +167,6 @@ public class NotificationService {
     public void shutdownScheduler() {
         scheduler.shutdown();
     }
-
 
     // 유저 알림 조회
     public List<UserNotificationResponse> getUserNotifications(String userSeq) {
