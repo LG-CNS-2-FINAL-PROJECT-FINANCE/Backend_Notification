@@ -4,31 +4,34 @@ import com.ddiring.Backend_Notification.service.NotificationService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
 
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationConsumer {
+
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
-
     private static final String MAIN_TOPIC = "notification";
 
     @KafkaListener(topics = MAIN_TOPIC, groupId = "notification-group")
     public void consume(String message) {
         try {
+            // JSON String → Map → DTO
             Map<String, Object> messageMap = objectMapper.readValue(message, new TypeReference<>() {});
+            EventEnvelope<NotificationPayload> envelope =
+                    objectMapper.convertValue(messageMap, new TypeReference<EventEnvelope<NotificationPayload>>() {});
 
-            NotificationEvent event = objectMapper.convertValue(messageMap, NotificationEvent.class);
-            notificationService.handleNotificationEvent(event);
+            // NotificationService 호출
+            notificationService.handleNotificationEvent(envelope);
+
+            System.out.println("✅ Kafka 이벤트 처리 완료: " + envelope);
         } catch (Exception e) {
-            log.error("Consumer 처리 실패: message={}, error={}", message, e.getMessage(), e);
+            System.err.println("⚠️ Kafka 역직렬화 실패: " + e.getMessage());
+            e.printStackTrace();
         }
     }
-
 }
