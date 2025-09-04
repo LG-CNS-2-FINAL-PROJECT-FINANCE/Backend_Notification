@@ -151,7 +151,13 @@ public class NotificationService {
                 List<SseEmitter> emittersToSend = new ArrayList<>(userEmitters);
                 for (SseEmitter emitter : emittersToSend) {
                     try {
-                        emitter.send(SseEmitter.event().name("heartbeat").data("ping"));
+                        // heartbeat 이벤트 전송
+                        SseEmitter.SseEventBuilder event = SseEmitter.event()
+                                .name("heartbeat")
+                                .data("ping")               // 반드시 data 포함
+                                .id(String.valueOf(System.currentTimeMillis())) // 이벤트 ID optional
+                                .reconnectTime(15000);      // 재연결 시간(ms)
+                        emitter.send(event);
                         log.info("💓 [SSE heartbeat 전송] userSeq={}", userSeq);
                     } catch (Exception e) {
                         log.warn("❌ [SSE heartbeat 전송 실패] userSeq={}, error={}", userSeq, e.getMessage());
@@ -160,7 +166,7 @@ public class NotificationService {
                     }
                 }
             }
-        }, 0, 15, TimeUnit.SECONDS); // 15초마다 heartbeat 전송
+        }, 0, 15, TimeUnit.SECONDS); // 15초마다 heartbeat
     }
 
     @PreDestroy
