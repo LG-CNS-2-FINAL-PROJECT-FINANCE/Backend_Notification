@@ -152,7 +152,7 @@ public class NotificationService {
                 for (SseEmitter emitter : emittersToSend) {
                     try {
                         emitter.send(SseEmitter.event().name("heartbeat").data("ping"));
-                        log.info("💓 [SSE heartbeat 전송] userSeq={}", userSeq); // <- heartbeat 로그 추가
+                        log.info("💓 [SSE heartbeat 전송] userSeq={}", userSeq);
                     } catch (Exception e) {
                         log.warn("❌ [SSE heartbeat 전송 실패] userSeq={}, error={}", userSeq, e.getMessage());
                         removeEmitters(Collections.singletonList(userSeq), emitter);
