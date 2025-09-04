@@ -43,13 +43,18 @@ public class NotificationService {
             emitters.computeIfAbsent(userSeq, k -> Collections.synchronizedSet(new HashSet<>()));
 
             Set<SseEmitter> userEmitters = emitters.get(userSeq);
-            if (!userEmitters.contains(emitter)) { // 중복 등록 방지
-                userEmitters.add(emitter);
-                log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, userEmitters.size());
-            }
+
+            // 기존 emitter 제거 후 새로 등록 (중복 방지)
+            userEmitters.removeIf(e -> {
+                e.complete();
+                return true;
+            });
+
+            userEmitters.add(emitter);
+            log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, userEmitters.size());
         }
 
-        // 완료/타임아웃 시 emitter 제거
+        // 완료/타임아웃/에러 시 emitter 제거
         emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
         emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
         emitter.onError((e) -> removeEmitters(userSeqList, emitter));
@@ -64,6 +69,7 @@ public class NotificationService {
         return emitter;
     }
 
+    // emitter 제거
     private void removeEmitters(List<String> userSeqList, SseEmitter emitter) {
         for (String seq : userSeqList) {
             Set<SseEmitter> userEmitters = emitters.get(seq);
