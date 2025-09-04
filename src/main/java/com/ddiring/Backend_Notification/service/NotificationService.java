@@ -29,44 +29,50 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final UserNotificationRepository userNotificationRepository;
 
-    // userSeq별 emitter (1명당 1개만 유지)
-    private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
+    private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
     // SSE 연결
-    public SseEmitter connect(String userSeq) {
-        log.info("🔌 [SSE 연결 시도] userSeq={}", userSeq);
+    // SSE 연결
+    public SseEmitter connectForUsers(List<String> userSeqList) {
+        log.info("🔌 [SSE 연결 시도] 대상 userSeqList={}", userSeqList);
+        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
 
-        // 기존 emitter 있으면 제거
-        if (emitters.containsKey(userSeq)) {
-            log.info("♻️ [기존 emitter 제거 후 재등록] userSeq={}", userSeq);
-            emitters.get(userSeq).complete();
-            emitters.remove(userSeq);
+        for (String userSeq : userSeqList) {
+            // 새 emitter 등록 전에 기존 emitter 정리
+            List<SseEmitter> list = emitters.computeIfAbsent(userSeq, k -> new CopyOnWriteArrayList<>());
+            for (SseEmitter old : list) {
+                try {
+                    old.complete(); // 기존 연결 종료
+                } catch (Exception ignore) {}
+            }
+            list.clear();
+
+            // 새로운 emitter 추가
+            list.add(emitter);
+            log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, list.size());
         }
 
-        // 새로운 emitter 등록
-        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
-        emitters.put(userSeq, emitter);
-
-        emitter.onCompletion(() -> removeEmitter(userSeq));
-        emitter.onTimeout(() -> removeEmitter(userSeq));
-        emitter.onError((e) -> removeEmitter(userSeq));
+        emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
+        emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
 
         try {
             emitter.send(SseEmitter.event().name("connect").data("connected"));
         } catch (Exception e) {
-            log.error("❌ [SSE 초기 연결 실패] userSeq={}, error={}", userSeq, e.getMessage(), e);
+            log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", userSeqList, e.getMessage(), e);
             emitter.completeWithError(e);
         }
 
         return emitter;
     }
 
-    private void removeEmitter(String userSeq) {
-        emitters.remove(userSeq);
-        log.info("🗑 [emitter 제거] userSeq={}", userSeq);
+    private void removeEmitters(List<String> userSeqList, SseEmitter emitter) {
+        for (String seq : userSeqList) {
+            List<SseEmitter> list = emitters.getOrDefault(seq, List.of());
+            list.remove(emitter);
+        }
     }
 
-    // Kafka Event 처리 (DB 저장 + SSE 전송)
+    // Kafka Event 처리 DB저장 + SSE 전송
     @Transactional
     public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
         NotificationPayload payload = envelope.getPayload();
@@ -106,20 +112,16 @@ public class NotificationService {
     // SSE 전송
     public void sendNotification(List<String> userSeqList, EventEnvelope<NotificationPayload> envelope) {
         for (String userSeq : userSeqList) {
-            SseEmitter emitter = emitters.get(userSeq);
+            List<SseEmitter> userEmitters = emitters.get(userSeq);
+            if (userEmitters == null || userEmitters.isEmpty()) continue;
 
-            if (emitter == null) {
-                log.warn("⚠️ [SSE 미연결 사용자] userSeq={} → 알림 미전송", userSeq);
-                continue;
-            }
-
-            try {
-                emitter.send(SseEmitter.event().name("notification").data(envelope));
-                log.info("📤 [SSE 전송 완료] userSeq={}, title={}", userSeq, envelope.getPayload().getTitle());
-            } catch (Exception e) {
-                log.error("❌ [SSE 전송 실패] userSeq={}, error={}", userSeq, e.getMessage(), e);
-                removeEmitter(userSeq);
-                emitter.completeWithError(e);
+            for (SseEmitter emitter : new ArrayList<>(userEmitters)) {
+                try {
+                    emitter.send(SseEmitter.event().name("notification").data(envelope));
+                } catch (Exception e) {
+                    userEmitters.remove(emitter);
+                    emitter.completeWithError(e);
+                }
             }
         }
     }
