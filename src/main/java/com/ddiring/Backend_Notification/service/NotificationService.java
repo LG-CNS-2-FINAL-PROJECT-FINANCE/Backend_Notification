@@ -36,25 +36,18 @@ public class NotificationService {
 
     // SSE 연결
     public SseEmitter connectForUsers(List<String> userSeqList) {
-        log.info("🔌 [SSE 연결 시도] 대상 userSeqList={}", userSeqList);
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
 
         for (String userSeq : userSeqList) {
             emitters.computeIfAbsent(userSeq, k -> Collections.synchronizedSet(new HashSet<>()));
-
             Set<SseEmitter> userEmitters = emitters.get(userSeq);
 
-            // 기존 emitter 제거 후 새로 등록 (중복 방지)
-            userEmitters.removeIf(e -> {
-                e.complete();
-                return true;
-            });
-
+            // 기존 emitter는 그대로 두고 새 emitter만 추가
             userEmitters.add(emitter);
             log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, userEmitters.size());
         }
 
-        // 완료/타임아웃/에러 시 emitter 제거
+        // 완료/타임아웃/에러 시 제거
         emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
         emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
         emitter.onError((e) -> removeEmitters(userSeqList, emitter));
@@ -151,12 +144,11 @@ public class NotificationService {
                 List<SseEmitter> emittersToSend = new ArrayList<>(userEmitters);
                 for (SseEmitter emitter : emittersToSend) {
                     try {
-                        // heartbeat 이벤트 전송
                         SseEmitter.SseEventBuilder event = SseEmitter.event()
                                 .name("heartbeat")
-                                .data("ping")               // 반드시 data 포함
-                                .id(String.valueOf(System.currentTimeMillis())) // 이벤트 ID optional
-                                .reconnectTime(15000);      // 재연결 시간(ms)
+                                .data("ping")
+                                .id(String.valueOf(System.currentTimeMillis()))
+                                .reconnectTime(15000);
                         emitter.send(event);
                         log.info("💓 [SSE heartbeat 전송] userSeq={}", userSeq);
                     } catch (Exception e) {
@@ -166,7 +158,7 @@ public class NotificationService {
                     }
                 }
             }
-        }, 0, 15, TimeUnit.SECONDS); // 15초마다 heartbeat
+        }, 0, 15, TimeUnit.SECONDS);
     }
 
     @PreDestroy
