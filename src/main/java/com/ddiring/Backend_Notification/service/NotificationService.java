@@ -34,17 +34,17 @@ public class NotificationService {
     private final Map<String, Set<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    private static final int MAX_EMITTER_PER_USER = 3; // 다중 탭 허용 시 최대 emitter 수 제한
+    private static final int MAX_EMITTER_PER_USER = 3;
 
     // SSE 연결
     public SseEmitter connectForUsers(List<String> userSeqList) {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
+        final List<String> finalUserSeqList = new ArrayList<>(userSeqList);
 
-        for (String userSeq : userSeqList) {
+        for (String userSeq : finalUserSeqList) {
             emitters.computeIfAbsent(userSeq, k -> Collections.synchronizedSet(new HashSet<>()));
             Set<SseEmitter> userEmitters = emitters.get(userSeq);
 
-            // 1) 기존 emitter 모두 종료하고 제거 (중복 방지)
             synchronized (userEmitters) {
                 Iterator<SseEmitter> it = userEmitters.iterator();
                 while (it.hasNext()) {
@@ -53,10 +53,8 @@ public class NotificationService {
                     it.remove();
                 }
 
-                // 2) 새 emitter 등록
                 userEmitters.add(emitter);
 
-                // 3) 다중 탭 허용 시 max emitter 수 제한
                 if (userEmitters.size() > MAX_EMITTER_PER_USER) {
                     Iterator<SseEmitter> overflowIt = userEmitters.iterator();
                     while (userEmitters.size() > MAX_EMITTER_PER_USER && overflowIt.hasNext()) {
@@ -70,15 +68,15 @@ public class NotificationService {
             log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, userEmitters.size());
         }
 
-        emitter.onCompletion(() -> removeEmitters(userSeqList, emitter));
-        emitter.onTimeout(() -> removeEmitters(userSeqList, emitter));
-        emitter.onError((e) -> removeEmitters(userSeqList, emitter));
+        emitter.onCompletion(() -> removeEmitters(finalUserSeqList, emitter));
+        emitter.onTimeout(() -> removeEmitters(finalUserSeqList, emitter));
+        emitter.onError((e) -> removeEmitters(finalUserSeqList, emitter));
 
         try {
             emitter.send(SseEmitter.event().name("connect").data("connected"));
-            log.info("🔗 [SSE 연결 성공] userSeq={}, emitter={}", userSeqList, emitter);
+            log.info("🔗 [SSE 연결 성공] userSeq={}, emitter={}", finalUserSeqList, emitter);
         } catch (Exception e) {
-            log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", userSeqList, e.getMessage(), e);
+            log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", finalUserSeqList, e.getMessage(), e);
             emitter.completeWithError(e);
         }
 
@@ -98,7 +96,6 @@ public class NotificationService {
         }
     }
 
-    // Kafka Event 처리 + SSE 전송
     @Transactional
     public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
         NotificationPayload payload = envelope.getPayload();

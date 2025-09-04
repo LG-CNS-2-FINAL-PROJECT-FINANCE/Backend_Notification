@@ -1,7 +1,5 @@
 package com.ddiring.Backend_Notification.controller;
 
-import com.ddiring.Backend_Notification.common.exception.ApplicationException;
-import com.ddiring.Backend_Notification.common.exception.ErrorCode;
 import com.ddiring.Backend_Notification.dto.response.UserNotificationResponse;
 import com.ddiring.Backend_Notification.dto.request.MarkAsReadRequest;
 import com.ddiring.Backend_Notification.service.NotificationService;
@@ -26,12 +24,13 @@ public class NotificationController {
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream() {
         log.info("🚀 [Controller] /api/notification/stream 호출됨");
-        String userSeq = GatewayRequestHeaderUtils.getUserSeq();
-        log.info("🔥 [SSE 요청 수신] userSeq={}", userSeq);
 
+        String userSeq = GatewayRequestHeaderUtils.getUserSeq();
         if (userSeq == null) {
-            log.warn("⚠️ GatewayRequestHeaderUtils.getUserSeq() 값이 null임. 헤더에서 못 읽어옴");
+            log.warn("⚠️ GatewayRequestHeaderUtils.getUserSeq() 값이 null임. 기본값 사용");
+            userSeq = "anonymous";
         }
+        log.info("🔥 [SSE 요청 수신] userSeq={}", userSeq);
 
         return notificationService.connectForUsers(Collections.singletonList(userSeq));
     }
@@ -39,13 +38,20 @@ public class NotificationController {
     @GetMapping("/list")
     public ResponseEntity<List<UserNotificationResponse>> getUserNotifications() {
         String userSeq = GatewayRequestHeaderUtils.getUserSeq();
-        log.info(userSeq);
+        if (userSeq == null) {
+            log.warn("⚠️ userSeq null. 기본값 사용");
+            userSeq = "anonymous";
+        }
         return ResponseEntity.ok(notificationService.getUserNotifications(userSeq));
     }
 
     @PostMapping("/read")
     public ResponseEntity<Void> markAsRead(@RequestBody MarkAsReadRequest request) {
         String userSeq = GatewayRequestHeaderUtils.getUserSeq();
+        if (userSeq == null) {
+            log.warn("⚠️ userSeq null. 기본값 사용");
+            userSeq = "anonymous";
+        }
         notificationService.markAsRead(userSeq, request);
         return ResponseEntity.ok().build();
     }
