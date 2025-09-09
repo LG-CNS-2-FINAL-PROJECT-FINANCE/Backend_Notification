@@ -67,8 +67,6 @@ public class NotificationService {
                 for (String token : deviceTokens) {
                     try {
                         fcmService.send(token, payload.getTitle(), payload.getMessage());
-                        log.info("FCM 전송 성공: userSeq={}, token={}, payload={}",
-                                userSeq, token, payload);
                     } catch (Exception e) {
                         log.warn("FCM 전송 실패: userSeq={}, token={}, error={}",
                                 userSeq, token, e.getMessage());

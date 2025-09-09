@@ -11,12 +11,12 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/device-tokens")
+@RequestMapping("/api/notification")
 public class UserDeviceTokenController {
 
     private final UserDeviceTokenService userDeviceTokenService;
 
-    @PostMapping
+    @PostMapping("/device-tokens/save")
     public UserDeviceTokenResponse saveOrUpdateToken(@Valid @RequestBody UserDeviceTokenRequest requestDto) {
         return userDeviceTokenService.saveOrUpdateToken(requestDto);
     }
