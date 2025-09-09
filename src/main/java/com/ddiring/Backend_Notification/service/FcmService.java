@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class FcmService {
-
     public void send(String token, String title, String body) {
         Notification notification = Notification.builder()
                 .setTitle(title)
