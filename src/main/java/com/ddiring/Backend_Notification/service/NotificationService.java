@@ -2,7 +2,6 @@ package com.ddiring.Backend_Notification.service;
 
 import com.ddiring.Backend_Notification.Entity.Notification;
 import com.ddiring.Backend_Notification.Entity.UserNotification;
-import com.ddiring.Backend_Notification.dto.request.MarkAsReadRequest;
 import com.ddiring.Backend_Notification.dto.response.NotificationResponse;
 import com.ddiring.Backend_Notification.dto.response.UserNotificationResponse;
 import com.ddiring.Backend_Notification.enums.NotificationStatus;
@@ -11,17 +10,14 @@ import com.ddiring.Backend_Notification.kafka.EventEnvelope;
 import com.ddiring.Backend_Notification.kafka.NotificationPayload;
 import com.ddiring.Backend_Notification.repository.NotificationRepository;
 import com.ddiring.Backend_Notification.repository.UserNotificationRepository;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -30,71 +26,8 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserNotificationRepository userNotificationRepository;
-
-    private final Map<String, Set<SseEmitter>> emitters = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-
-    private static final int MAX_EMITTER_PER_USER = 3;
-
-    // SSE 연결
-    public SseEmitter connectForUsers(List<String> userSeqList) {
-        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
-        final List<String> finalUserSeqList = new ArrayList<>(userSeqList);
-
-        for (String userSeq : finalUserSeqList) {
-            emitters.computeIfAbsent(userSeq, k -> Collections.synchronizedSet(new HashSet<>()));
-            Set<SseEmitter> userEmitters = emitters.get(userSeq);
-
-            synchronized (userEmitters) {
-                Iterator<SseEmitter> it = userEmitters.iterator();
-                while (it.hasNext()) {
-                    SseEmitter e = it.next();
-                    try { e.complete(); } catch (Exception ignored) {}
-                    it.remove();
-                }
-
-                userEmitters.add(emitter);
-
-                if (userEmitters.size() > MAX_EMITTER_PER_USER) {
-                    Iterator<SseEmitter> overflowIt = userEmitters.iterator();
-                    while (userEmitters.size() > MAX_EMITTER_PER_USER && overflowIt.hasNext()) {
-                        SseEmitter old = overflowIt.next();
-                        try { old.complete(); } catch (Exception ignored) {}
-                        overflowIt.remove();
-                    }
-                }
-            }
-
-            log.info("✅ [emitter 등록] userSeq={}, 현재 등록된 emitter 수={}", userSeq, userEmitters.size());
-        }
-
-        emitter.onCompletion(() -> removeEmitters(finalUserSeqList, emitter));
-        emitter.onTimeout(() -> removeEmitters(finalUserSeqList, emitter));
-        emitter.onError((e) -> removeEmitters(finalUserSeqList, emitter));
-
-        try {
-            emitter.send(SseEmitter.event().name("connect").data("connected"));
-            log.info("🔗 [SSE 연결 성공] userSeq={}, emitter={}", finalUserSeqList, emitter);
-        } catch (Exception e) {
-            log.error("❌ [SSE 초기 연결 실패] userSeqList={}, error={}", finalUserSeqList, e.getMessage(), e);
-            emitter.completeWithError(e);
-        }
-
-        return emitter;
-    }
-
-    private void removeEmitters(List<String> userSeqList, SseEmitter emitter) {
-        for (String seq : userSeqList) {
-            Set<SseEmitter> userEmitters = emitters.get(seq);
-            if (userEmitters != null) {
-                synchronized (userEmitters) {
-                    userEmitters.remove(emitter);
-                    log.info("🗑 [emitter 제거] userSeq={}, 남은 emitter 수={}", seq, userEmitters.size());
-                    if (userEmitters.isEmpty()) emitters.remove(seq);
-                }
-            }
-        }
-    }
+    private final UserDeviceTokenService userDeviceTokenService;
+    private final FcmService fcmService;
 
     @Transactional
     public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
@@ -102,6 +35,7 @@ public class NotificationService {
         List<String> userSeqList = payload.getUserSeq();
         LocalDateTime now = LocalDateTime.now();
 
+        //Notification 저장
         Notification notification = Notification.builder()
                 .eventId(envelope.getEventId())
                 .notificationType(NotificationType.valueOf(payload.getNotificationType()))
@@ -112,9 +46,13 @@ public class NotificationService {
                 .build();
         notificationRepository.save(notification);
 
+        //UserNotification 저장 + FCM 전송
         if (userSeqList != null && !userSeqList.isEmpty()) {
+            List<UserNotification> userNotifications = new ArrayList<>();
+
             for (String userSeq : userSeqList) {
-                UserNotification un = UserNotification.builder()
+                //UserNotification 생성
+                UserNotification userNotification = UserNotification.builder()
                         .notification(notification)
                         .userSeq(userSeq)
                         .notificationStatus(NotificationStatus.UNREAD)
@@ -122,66 +60,27 @@ public class NotificationService {
                         .createdId("system").createdAt(now)
                         .updatedId("system").updatedAt(now)
                         .build();
-                userNotificationRepository.save(un);
-            }
-        }
+                userNotifications.add(userNotification);
 
-        sendNotification(userSeqList, envelope);
-    }
-
-    public void sendNotification(List<String> userSeqList, EventEnvelope<NotificationPayload> envelope) {
-        for (String userSeq : userSeqList) {
-            Set<SseEmitter> userEmitters = emitters.get(userSeq);
-            if (userEmitters == null || userEmitters.isEmpty()) continue;
-
-            List<SseEmitter> copyEmitters;
-            synchronized (userEmitters) {
-                copyEmitters = new ArrayList<>(userEmitters);
-            }
-
-            for (SseEmitter emitter : copyEmitters) {
-                try {
-                    emitter.send(SseEmitter.event().name("notification").data(envelope));
-                } catch (Exception e) {
-                    log.warn("❌ [SSE 전송 실패] userSeq={}, error={}", userSeq, e.getMessage());
-                    removeEmitters(Collections.singletonList(userSeq), emitter);
-                    emitter.completeWithError(e);
-                }
-            }
-        }
-    }
-
-    @PostConstruct
-    public void initHeartbeat() {
-        scheduler.scheduleAtFixedRate(() -> {
-            for (Map.Entry<String, Set<SseEmitter>> entry : emitters.entrySet()) {
-                String userSeq = entry.getKey();
-                Set<SseEmitter> userEmitters = entry.getValue();
-                List<SseEmitter> copyEmitters;
-                synchronized (userEmitters) { copyEmitters = new ArrayList<>(userEmitters); }
-
-                for (SseEmitter emitter : copyEmitters) {
+                //디바이스 토큰 조회 후 FCM 전송
+                List<String> deviceTokens = userDeviceTokenService.getDeviceTokens(userSeq);
+                for (String token : deviceTokens) {
                     try {
-                        SseEmitter.SseEventBuilder event = SseEmitter.event()
-                                .name("heartbeat")
-                                .data("ping")
-                                .id(String.valueOf(System.currentTimeMillis()))
-                                .reconnectTime(15000);
-                        emitter.send(event);
-                        log.info("💓 [SSE heartbeat 전송 성공] userSeq={}, emitter={}", userSeq, emitter);
+                        fcmService.send(token, payload.getTitle(), payload.getMessage());
                     } catch (Exception e) {
-                        log.warn("❌ [SSE heartbeat 전송 실패] userSeq={}, error={}", userSeq, e.getMessage());
-                        removeEmitters(Collections.singletonList(userSeq), emitter);
-                        emitter.completeWithError(e);
+                        log.warn("FCM 전송 실패: userSeq={}, token={}, error={}",
+                                userSeq, token, e.getMessage());
                     }
                 }
             }
-        }, 0, 15, TimeUnit.SECONDS);
+
+            userNotificationRepository.saveAll(userNotifications);
+        }
+
+        log.info("Notification 처리 완료: eventId={}, users={}", envelope.getEventId(), userSeqList);
     }
 
-    @PreDestroy
-    public void shutdownScheduler() { scheduler.shutdown(); }
-
+    //알림 리스트 조회
     public List<UserNotificationResponse> getUserNotifications(String userSeq) {
         return userNotificationRepository.findAllWithNotificationByUserSeq(userSeq).stream()
                 .map(n -> UserNotificationResponse.builder()
@@ -199,16 +98,5 @@ public class NotificationService {
                                 .build())
                         .build())
                 .toList();
-    }
-
-    public void markAsRead(String userSeq, MarkAsReadRequest request) {
-        List<UserNotification> list =
-                userNotificationRepository.findAllByUserSeqAndIds(userSeq, request.getUserNotificationSeqs());
-        LocalDateTime now = LocalDateTime.now();
-        list.forEach(n -> {
-            n.setNotificationStatus(NotificationStatus.READ);
-            n.setReadAt(now);
-        });
-        userNotificationRepository.saveAll(list);
     }
 }

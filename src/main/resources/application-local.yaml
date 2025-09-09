@@ -33,3 +33,6 @@ kafka:
     properties:
       spring.json.trusted.packages: "*"
       spring.json.use.type.headers: false
+
+firebase:
+  config: ${FIREBASE_CONFIG:}

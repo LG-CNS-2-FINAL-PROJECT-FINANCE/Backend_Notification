@@ -38,3 +38,8 @@ out/
 
 ### Docker volumes (local DB/Kafka/ZooKeeper data) ###
 /data/
+
+### Firebase Service Account Key (DO NOT COMMIT) ###
+src/main/resources/serviceAccountKey.json
+*.firebase.json
+*.secret.json

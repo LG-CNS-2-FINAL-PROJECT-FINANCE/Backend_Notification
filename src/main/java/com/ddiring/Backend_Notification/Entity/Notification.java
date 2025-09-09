@@ -3,21 +3,17 @@ package com.ddiring.Backend_Notification.Entity;
 import com.ddiring.Backend_Notification.converter.NotificationTypeConverter;
 import com.ddiring.Backend_Notification.enums.NotificationType;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "notification")
-@Data
+@Getter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class Notification {
-
     //알림 번호
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

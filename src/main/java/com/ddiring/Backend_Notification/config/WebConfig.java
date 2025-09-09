@@ -12,11 +12,9 @@ public class WebConfig {
         return new WebMvcConfigurer() {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
-                registry.addMapping("/api/**")
-                        .allowedOrigins("http://127.0.0.1:3000") // React dev 서버
-                        .allowedMethods("*")
-                        .allowedHeaders("Authorization", "Content-Type")
-                        .allowCredentials(true);
+                registry.addMapping("/**")
+                        .allowedOrigins("http://localhost:3000") // 프론트 주소
+                        .allowedMethods("*");
             }
         };
     }

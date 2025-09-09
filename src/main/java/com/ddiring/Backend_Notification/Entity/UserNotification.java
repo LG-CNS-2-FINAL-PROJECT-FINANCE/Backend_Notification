@@ -3,16 +3,13 @@ package com.ddiring.Backend_Notification.Entity;
 import com.ddiring.Backend_Notification.converter.NotificationStatusConverter;
 import com.ddiring.Backend_Notification.enums.NotificationStatus;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "user_notification")
-@Data
+@Getter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
