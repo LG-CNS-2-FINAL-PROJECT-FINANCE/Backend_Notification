@@ -2,6 +2,7 @@ package com.ddiring.Backend_Notification.service;
 
 import com.ddiring.Backend_Notification.Entity.Notification;
 import com.ddiring.Backend_Notification.Entity.UserNotification;
+import com.ddiring.Backend_Notification.dto.request.MarkAsReadRequest;
 import com.ddiring.Backend_Notification.dto.response.NotificationResponse;
 import com.ddiring.Backend_Notification.dto.response.UserNotificationResponse;
 import com.ddiring.Backend_Notification.enums.NotificationStatus;
@@ -99,4 +100,23 @@ public class NotificationService {
                         .build())
                 .toList();
     }
+
+    @Transactional
+    public void markAsRead(String userSeq, MarkAsReadRequest request) {
+        List<UserNotification> list = userNotificationRepository.findAllByUserSeqAndIds(userSeq, request.getUserNotificationSeqs());
+
+        if (list.isEmpty()) {
+            log.warn("읽음 처리할 알림 없음: userSeq={}, ids={}", userSeq, request.getUserNotificationSeqs());
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        list.forEach(userNotification -> userNotification.markAsRead(userSeq, now));
+
+        userNotificationRepository.saveAll(list);
+
+        log.info("[알림 읽음 처리 완료] userSeq={}, count={}", userSeq, list.size());
+    }
+
 }

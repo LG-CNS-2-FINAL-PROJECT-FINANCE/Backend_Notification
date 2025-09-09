@@ -24,24 +24,21 @@ public class NotificationController {
     public ResponseEntity<List<UserNotificationResponse>> getUserNotifications() {
         String userSeq = GatewayRequestHeaderUtils.getUserSeq();
         if (userSeq == null) {
-            log.warn("⚠️ userSeq null. 기본값 사용");
+            log.warn("userSeq null. 기본값 사용");
             userSeq = "anonymous";
         }
-        log.info("🔥 [알림 리스트 조회] userSeq={}", userSeq);
+        log.info("[알림 리스트 조회] userSeq={}", userSeq);
         return ResponseEntity.ok(notificationService.getUserNotifications(userSeq));
     }
 
     // 읽음 처리
-//    @PostMapping("/read")
-//    public ResponseEntity<Void> markAsRead(@RequestBody MarkAsReadRequest request) {
-//        String userSeq = GatewayRequestHeaderUtils.getUserSeq();
-//        if (userSeq == null) {
-//            log.warn("⚠️ userSeq null. 기본값 사용");
-//            userSeq = "anonymous";
-//        }
-//        notificationService.markAsRead(userSeq, request);
-//        log.info("✅ [알림 읽음 처리 완료] userSeq={}, count={}", userSeq,
-//                request.getUserNotificationSeqs().size());
-//        return ResponseEntity.ok().build();
-//    }
+    @PostMapping("/read")
+    public ResponseEntity<Void> markAsRead(@RequestBody MarkAsReadRequest request) {
+        String userSeq = GatewayRequestHeaderUtils.getUserSeq();
+        if (userSeq == null) {
+            userSeq = "anonymous";
+        }
+        notificationService.markAsRead(userSeq, request);
+        return ResponseEntity.ok().build();
+    }
 }

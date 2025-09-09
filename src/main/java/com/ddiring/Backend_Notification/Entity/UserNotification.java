@@ -58,4 +58,11 @@ public class UserNotification {
     //수정일자
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    public void markAsRead(String updatedBy, LocalDateTime now) {
+        this.notificationStatus = NotificationStatus.READ;
+        this.readAt = now;
+        this.updatedId = updatedBy;
+        this.updatedAt = now;
+    }
 }
