@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,8 +19,8 @@ public class FirebaseConfig {
 
     @Bean
     public FirebaseApp firebaseApp() throws IOException {
-        String firebaseJson = System.getenv("FIREBASE_CONFIG");
-
+//        String firebaseJson = System.getenv("FIREBASE_CONFIG");
+//
 //        if (firebaseJson != null && !firebaseJson.isEmpty()) {
 //            //운영 환경: 환경변수에서 읽기
 //            GoogleCredentials credentials = GoogleCredentials.fromStream(
@@ -41,13 +42,39 @@ public class FirebaseConfig {
 //                    .build();
 //            return FirebaseApp.initializeApp(options);
 //        }
-        GoogleCredentials credentials = GoogleCredentials.fromStream(
-                new ByteArrayInputStream(firebaseJson.getBytes())
-        );
-        FirebaseOptions options = FirebaseOptions.builder()
-                .setCredentials(credentials)
-                .build();
-        return FirebaseApp.initializeApp(options);
+
+        String firebaseConfigEnv = System.getenv("FIREBASE_CONFIG");
+
+        if (firebaseConfigEnv != null && !firebaseConfigEnv.isEmpty()) {
+            File f = new File(firebaseConfigEnv);
+
+            GoogleCredentials credentials;
+            if (f.exists()) {
+                // 환경변수가 파일 경로일 경우 (배포 환경)
+                credentials = GoogleCredentials.fromStream(new FileInputStream(f));
+            } else {
+                // 환경변수가 JSON 문자열일 경우 (로컬 환경)
+                credentials = GoogleCredentials.fromStream(
+                        new ByteArrayInputStream(firebaseConfigEnv.getBytes())
+                );
+            }
+
+            FirebaseOptions options = FirebaseOptions.builder()
+                    .setCredentials(credentials)
+                    .build();
+            return FirebaseApp.initializeApp(options);
+        } else {
+            // fallback: 로컬 리소스 파일 사용
+            String localPath = "src/main/resources/serviceAccountKey.json";
+            if (!Files.exists(Paths.get(localPath))) {
+                throw new IllegalStateException("Firebase 설정 파일 없음: " + localPath);
+            }
+            GoogleCredentials credentials = GoogleCredentials.fromStream(new FileInputStream(localPath));
+            FirebaseOptions options = FirebaseOptions.builder()
+                    .setCredentials(credentials)
+                    .build();
+            return FirebaseApp.initializeApp(options);
+        }
     }
 
     @Bean
