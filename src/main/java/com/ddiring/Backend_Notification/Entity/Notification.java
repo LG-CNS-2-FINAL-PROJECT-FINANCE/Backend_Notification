@@ -21,7 +21,7 @@ public class Notification {
     private Integer notificationSeq;
 
     //Kafka 이벤트 ID (UUID)
-    @Column(name = "event_id", nullable = false, unique = true, length = 36)
+    @Column(name = "event_id", nullable = false, unique = true, length = 225)
     private String eventId;
 
     //알림 종류

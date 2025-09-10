@@ -44,7 +44,7 @@ public class UserNotification {
     private LocalDateTime readAt;
 
     //생성자
-    @Column(name = "created_id", nullable = false, length = 20)
+    @Column(name = "created_id", nullable = false, length = 225)
     private String createdId;
 
     //생성일자
