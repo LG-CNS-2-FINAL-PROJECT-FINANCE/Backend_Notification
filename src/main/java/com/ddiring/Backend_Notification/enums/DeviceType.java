@@ -1,9 +1,8 @@
 package com.ddiring.Backend_Notification.enums;
 
 public enum DeviceType {
-    WEB(0),         //web
-    ANDROID(1),     //android
-    IOS(2);         //mac
+    WEB(0),
+    APP(1);
 
     private final int code;
 
