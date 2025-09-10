@@ -12,9 +12,9 @@ import java.time.Instant;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class EventEnvelope<T> {
     private String eventId;
+    private String eventType;
     private Instant timestamp;
     private T payload;
 }

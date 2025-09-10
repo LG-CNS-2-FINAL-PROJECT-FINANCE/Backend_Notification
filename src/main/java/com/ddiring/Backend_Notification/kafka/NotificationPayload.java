@@ -12,7 +12,6 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class NotificationPayload {
     private List<String> userSeq;         // 수신자
     private String notificationType;       // 알림 타입
