@@ -10,6 +10,8 @@ import java.time.Instant;
 
 @Getter
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class EventEnvelope<T> {
     private String eventId;
