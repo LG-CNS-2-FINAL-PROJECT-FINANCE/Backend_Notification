@@ -40,10 +40,28 @@ public class NotificationService {
         List<String> userSeqList = payload.getUserSeq();
         LocalDateTime now = LocalDateTime.now();
 
+        // 이벤트 타입 문자열 → DB 저장용 enum 변환
+        NotificationType notificationType;
+        String eventType = payload.getNotificationType();
+
+        switch (eventType) {
+            case "INVESTMENT.SUCCEEDED":
+            case "TRADE.SUCCEEDED":
+                notificationType = NotificationType.INFORMATION;
+                break;
+            case "INVESTMENT.FAILED":
+            case "TRADE.FAILED":
+                notificationType = NotificationType.ERROR;
+                break;
+            default:
+                notificationType = NotificationType.WARNING;
+                break;
+        }
+
         //Notification 저장
         Notification notification = Notification.builder()
                 .eventId(envelope.getEventId())
-                .notificationType(NotificationType.valueOf(payload.getNotificationType()))
+                .notificationType(notificationType) // enum으로 저장
                 .title(payload.getTitle())
                 .message(payload.getMessage())
                 .createdId("system").createdAt(now)
@@ -56,7 +74,6 @@ public class NotificationService {
             List<UserNotification> userNotifications = new ArrayList<>();
 
             for (String userSeq : userSeqList) {
-                //UserNotification 생성
                 UserNotification userNotification = UserNotification.builder()
                         .notification(notification)
                         .userSeq(userSeq)
@@ -67,7 +84,6 @@ public class NotificationService {
                         .build();
                 userNotifications.add(userNotification);
 
-                //디바이스 토큰 조회 후 FCM 전송
                 List<String> deviceTokens = userDeviceTokenService.getDeviceTokens(userSeq);
                 for (String token : deviceTokens) {
                     try {

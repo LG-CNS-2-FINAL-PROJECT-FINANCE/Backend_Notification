@@ -41,7 +41,6 @@ public class NotificationConsumer {
 
     private void handleEvent(String message, Acknowledgment ack, String eventType, boolean isSmartContract) {
         try {
-            // EventEnvelope<JsonNode>로 읽기
             EventEnvelope<JsonNode> envelope = objectMapper.readValue(
                     message,
                     objectMapper.getTypeFactory().constructParametricType(EventEnvelope.class, JsonNode.class)
@@ -54,27 +53,19 @@ public class NotificationConsumer {
             }
 
             JsonNode payloadNode = envelope.getPayload();
+            NotificationPayload notificationPayload;
 
             if (isSmartContract) {
-                String type = envelope.getEventType(); // eventType 사용
+                String type = envelope.getEventType();
                 if (!ALLOWED_SMARTCONTRACT_EVENTS.contains(type)) {
                     log.info("무시된 Kafka {} 이벤트: eventType={}, eventId={}", eventType, type, envelope.getEventId());
                     ack.acknowledge();
                     return;
                 }
 
-                // 필요한 필드 추출 (존재하면)
-                String projectId = payloadNode.has("projectId") ? payloadNode.get("projectId").asText() : null;
-                Long investmentId = payloadNode.has("investmentId") ? payloadNode.get("investmentId").asLong() : null;
-                Long tradeId = payloadNode.has("tradeId") ? payloadNode.get("tradeId").asLong() : null;
-                String status = payloadNode.has("status") ? payloadNode.get("status").asText() : null;
-                String reason = payloadNode.has("reason") ? payloadNode.get("reason").asText() : null;
-                String errorType = payloadNode.has("errorType") ? payloadNode.get("errorType").asText() : null;
-                String errorMessage = payloadNode.has("errorMessage") ? payloadNode.get("errorMessage").asText() : null;
+                String title;
+                String messageText;
 
-                // 제목/메시지 설정
-                String title = "";
-                String messageText = "";
                 switch (type) {
                     case "INVESTMENT.SUCCEEDED":
                         title = "투자 성공";
@@ -82,7 +73,9 @@ public class NotificationConsumer {
                         break;
                     case "INVESTMENT.FAILED":
                         title = "투자 실패";
-                        messageText = reason != null ? reason : "프로젝트 투자를 실패했습니다.";
+                        messageText = payloadNode.has("reason") ?
+                                payloadNode.get("reason").asText() :
+                                payloadNode.has("errorMessage") ? payloadNode.get("errorMessage").asText() : "프로젝트 투자를 실패했습니다.";
                         break;
                     case "TRADE.SUCCEEDED":
                         title = "거래 성공";
@@ -90,36 +83,31 @@ public class NotificationConsumer {
                         break;
                     case "TRADE.FAILED":
                         title = "거래 실패";
-                        messageText = errorMessage != null ? errorMessage : "거래를 실패했습니다.";
+                        messageText = payloadNode.has("errorMessage") ?
+                                payloadNode.get("errorMessage").asText() :
+                                "거래를 실패했습니다.";
+                        break;
+                    default:
+                        title = "알림";
+                        messageText = "새로운 알림이 있습니다.";
                         break;
                 }
 
-                // NotificationPayload 생성
-                NotificationPayload notificationPayload = NotificationPayload.builder()
+                notificationPayload = NotificationPayload.builder()
                         .userSeq(null) // 필요 시 추출
-                        .notificationType(type)
+                        .notificationType(type) // 문자열 그대로 전달
                         .title(title)
                         .message(messageText)
                         .build();
 
-                EventEnvelope<NotificationPayload> newEnvelope = EventEnvelope.<NotificationPayload>builder()
-                        .eventId(envelope.getEventId())
-                        .timestamp(envelope.getTimestamp())
-                        .payload(notificationPayload)
-                        .build();
-
-                notificationService.handleNotificationEvent(newEnvelope);
-                ack.acknowledge();
-                log.info("Kafka {} 이벤트 처리 완료: eventId={}", eventType, envelope.getEventId());
-                return;
+            } else {
+                notificationPayload = objectMapper.treeToValue(payloadNode, NotificationPayload.class);
             }
 
-            // 일반 알림 처리
-            NotificationPayload payload = objectMapper.treeToValue(payloadNode, NotificationPayload.class);
             EventEnvelope<NotificationPayload> newEnvelope = EventEnvelope.<NotificationPayload>builder()
                     .eventId(envelope.getEventId())
                     .timestamp(envelope.getTimestamp())
-                    .payload(payload)
+                    .payload(notificationPayload)
                     .build();
 
             notificationService.handleNotificationEvent(newEnvelope);
