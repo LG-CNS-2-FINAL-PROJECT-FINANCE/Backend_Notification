@@ -16,8 +16,11 @@ public class NotificationConsumer {
 
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
+    private static final String NOTIFICATION_TOPIC = "notification";
+    private static final String SMARTCONTRACT_TOPIC = "INVESTMENT";
 
-    @KafkaListener(topics = "notification", groupId = "BackendNotification")
+    //알림 consume
+    @KafkaListener(topics = NOTIFICATION_TOPIC, groupId = "BackendNotification")
     public void consume(String message, Acknowledgment ack) {
         try {
             EventEnvelope<NotificationPayload> envelope = objectMapper
@@ -39,4 +42,9 @@ public class NotificationConsumer {
         }
     }
 
+    //스마트 컨트랙트 consume
+    @KafkaListener(topics = SMARTCONTRACT_TOPIC, groupId = "BackendNotification")
+    public void smartContractConsume() {
+
+    }
 }
