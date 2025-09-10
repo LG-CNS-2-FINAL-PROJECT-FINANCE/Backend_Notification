@@ -82,7 +82,7 @@ public class NotificationService {
 
     //알림 리스트 조회
     public List<UserNotificationResponse> getUserNotifications(String userSeq) {
-        return userNotificationRepository.findAllWithNotificationByUserSeq(userSeq).stream()
+        return userNotificationRepository.findAllWithNotificationByUserSeqAndStatus(userSeq, NotificationStatus.UNREAD).stream()
                 .map(n -> UserNotificationResponse.builder()
                         .userNotificationSeq(n.getUserNotificationSeq())
                         .userSeq(n.getUserSeq())
