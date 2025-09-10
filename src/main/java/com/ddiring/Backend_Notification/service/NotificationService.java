@@ -31,6 +31,11 @@ public class NotificationService {
 
     @Transactional
     public void handleNotificationEvent(EventEnvelope<NotificationPayload> envelope) {
+        if (notificationRepository.existsByEventId(envelope.getEventId())) {
+            log.warn("중복 이벤트 수신: eventId={}", envelope.getEventId());
+            return; // 이미 처리했으면 스킵
+        }
+
         NotificationPayload payload = envelope.getPayload();
         List<String> userSeqList = payload.getUserSeq();
         LocalDateTime now = LocalDateTime.now();
