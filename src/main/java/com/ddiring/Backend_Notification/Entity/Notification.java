@@ -38,7 +38,7 @@ public class Notification {
     private String message;
 
     //생성자
-    @Column(name = "created_id", nullable = false, length = 20)
+    @Column(name = "created_id", nullable = false, length = 225)
     private String createdId;
 
     //생성일자
@@ -46,7 +46,7 @@ public class Notification {
     private LocalDateTime createdAt;
 
     //수정자
-    @Column(name = "updated_id", nullable = false, length = 20)
+    @Column(name = "updated_id", nullable = false, length = 225)
     private String updatedId;
 
     //수정일자

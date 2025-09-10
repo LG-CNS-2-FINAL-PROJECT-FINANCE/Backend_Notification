@@ -52,7 +52,7 @@ public class UserNotification {
     private LocalDateTime createdAt;
 
     //수정자
-    @Column(name = "updated_id", nullable = false, length = 20)
+    @Column(name = "updated_id", nullable = false, length = 225)
     private String updatedId;
 
     //수정일자
