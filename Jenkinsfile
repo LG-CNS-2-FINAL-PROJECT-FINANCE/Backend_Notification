@@ -3,6 +3,7 @@ def APP_NAME
 def APP_VERSION
 def DOCKER_IMAGE_NAME
 def PROD_IMAGE_NAME
+def HELM_VALUES
 
 pipeline {
     agent any
@@ -10,10 +11,9 @@ pipeline {
     environment {
         USER_EMAIL = 'ssassaium@gmail.com'
         USER_ID = 'kaebalsaebal'
-        MANIFEST_DIR = 'helm_chart'
         REGISTRY_HOST = credentials('DEV_REGISTRY')
         PROD_REGISTRY = credentials('PROD_REGISTRY')
-        SERVICE_NAME = 'notification'
+        SERVICE_NAME = '(서비스 이름: product, market 등...)'
     }
 
     tools {
@@ -29,6 +29,9 @@ pipeline {
             }
             steps {
                 script {
+
+                    REGISTRY_HOST = PROD_REGISTRY
+
                     withCredentials([[
                         $class: 'AmazonWebServicesCredentialsBinding',
                         credentialsId: 'aws-credential',
@@ -37,7 +40,7 @@ pipeline {
                     ]]) {
                         sh """
                         aws ecr get-login-password --region ap-northeast-2 \
-                        | podman login --username AWS --password-stdin ${PROD_REGISTRY}
+                        | podman login --username AWS --password-stdin ${REGISTRY_HOST}
                         """
                     }
                 }
@@ -94,7 +97,7 @@ pipeline {
                     }
                     // master/main 브랜취일시 ecr로 푸쉬
                     else if (env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'main'){
-                        PROD_IMAGE_NAME = "${PROD_REGISTRY}/${APP_NAME}:${APP_VERSION}"
+                        PROD_IMAGE_NAME = "${REGISTRY_HOST}/${APP_NAME}:${APP_VERSION}"
                         sh "echo Image pushing to prod registry..."
                         sh "podman tag ${DOCKER_IMAGE_NAME} ${PROD_IMAGE_NAME}"
                         sh "podman push ${PROD_IMAGE_NAME}"
@@ -119,7 +122,9 @@ pipeline {
 
 												// master/main 브랜취용 매니페스트 분리
                         if (env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'main'){
-                            MANIFEST_DIR = 'helm_prod'
+                            HELM_VALUES = 'values-prod'
+                        } else if (env.BRANCH_NAME == 'dev') {
+                            HELM_VALUES = 'values-dev'
                         }
 
                         sh """
@@ -132,12 +137,12 @@ pipeline {
                             cd Backend_Manifests
 
                             # yq를 사용하여 개발 환경의 values 파일 업데이트
-                            yq -i '.image.repository = "${imageRepo}"' ${MANIFEST_DIR}/${SERVICE_NAME}/values-dev.yaml
-                            yq -i '.image.tag = "${imageTag}"' ${MANIFEST_DIR}/${SERVICE_NAME}/values-dev.yaml
+                            yq -i '.image.repository = "${imageRepo}"' helm_chart/${SERVICE_NAME}/${HELM_VALUES}.yaml
+                            yq -i '.image.tag = "${imageTag}"' helm_chart/${SERVICE_NAME}/${HELM_VALUES}.yaml
 
                             # 변경 사항 커밋 및 푸시
                             if ! git diff --quiet; then
-                              git add ${MANIFEST_DIR}/${SERVICE_NAME}/values-dev.yaml
+                              git add helm_chart/${SERVICE_NAME}/${HELM_VALUES}.yaml
                               git commit -m "Update image tag for dev to ${DOCKER_IMAGE_NAME} [skip ci]"
                               git push origin master
                             else
