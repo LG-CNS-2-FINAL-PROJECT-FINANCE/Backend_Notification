@@ -22,11 +22,9 @@ public class SmartContractPayload {
     private Long tradeAmount;
     private String status;
 
-    // 실패 이벤트용
     private String errorType;
     private String errorMessage;
 
-    // 추가 가능
     private String reason;
     private Long initialAmountPerToken;
 }
