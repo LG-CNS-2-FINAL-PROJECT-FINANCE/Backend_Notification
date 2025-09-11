@@ -20,7 +20,7 @@ public class NotificationConsumer {
     private final ObjectMapper objectMapper;
 
     private static final String NOTIFICATION_TOPIC = "notification";
-    private static final String SMARTCONTRACT_TOPIC = "INVESTMENT";
+    private static final String SMARTCONTRACT_TOPIC = "NOTIFICATION";
 
     private static final Set<String> ALLOWED_SMARTCONTRACT_EVENTS = Set.of(
             "INVESTMENT.SUCCEEDED",
@@ -94,8 +94,8 @@ public class NotificationConsumer {
                 }
 
                 notificationPayload = NotificationPayload.builder()
-                        .userSeq(null) // 필요 시 추출
-                        .notificationType(type) // 문자열 그대로 전달
+                        .userSeq(null)
+                        .notificationType(type)
                         .title(title)
                         .message(messageText)
                         .build();
